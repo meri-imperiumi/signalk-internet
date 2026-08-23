@@ -76,6 +76,11 @@ module.exports = (app) => {
             properties: {
               path: { type: "string", title: "Signal K Path" },
               triggerValue: { type: "string", title: "Trigger Value" },
+              negate: {
+                type: "boolean",
+                title: "NOT (match when value differs)",
+                default: false,
+              },
               resultingState: {
                 type: "string",
                 enum: ["online", "metered", "offline"],
@@ -92,6 +97,11 @@ module.exports = (app) => {
             properties: {
               path: { type: "string", title: "Hardware Path" },
               matchValue: { type: "string", title: "Value to Match" },
+              negate: {
+                type: "boolean",
+                title: "NOT (match when value differs)",
+                default: false,
+              },
               resultingState: {
                 type: "string",
                 enum: ["online", "metered", "offline"],

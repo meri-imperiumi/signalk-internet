@@ -67,6 +67,63 @@ describe("evaluator", () => {
     assert.strictEqual(ev.current().state, "metered");
   });
 
+  test("negated heuristic matches when value differs from triggerValue", () => {
+    const ev = createEvaluator({
+      config: makeConfig({
+        heuristics: [
+          {
+            path: "watch.state.onWatch",
+            triggerValue: "true",
+            negate: true,
+            resultingState: "metered",
+          },
+        ],
+      }),
+    });
+    ev.set("watch.state.onWatch", false);
+    assert.strictEqual(ev.current().state, "metered");
+  });
+
+  test("negated heuristic does not match the trigger value itself", () => {
+    const seen = [];
+    const ev = createEvaluator({
+      config: makeConfig({
+        heuristics: [
+          {
+            path: "watch.state.onWatch",
+            triggerValue: "true",
+            negate: true,
+            resultingState: "metered",
+          },
+        ],
+      }),
+      onState: (state) => seen.push(state),
+    });
+    ev.set("watch.state.onWatch", true);
+    // Trigger value itself must NOT match; stays at the default state.
+    assert.strictEqual(ev.current().state, DEFAULT_STATE);
+  });
+
+  test("negated heuristic does not match an absent value", () => {
+    const seen = [];
+    const ev = createEvaluator({
+      config: makeConfig({
+        heuristics: [
+          {
+            path: "networking.lte.connectionText",
+            triggerValue: "No service",
+            negate: true,
+            resultingState: "online",
+          },
+        ],
+      }),
+      onState: (state) => seen.push(state),
+    });
+    ev.reevaluate();
+    // No value set yet — a NOT rule still needs a value to negate against.
+    assert.deepStrictEqual(seen, []);
+  });
+
   test("hardware up mapping triggers a targeted verify probe", async () => {
     const calls = [];
     const probe = async () => {
@@ -91,6 +148,71 @@ describe("evaluator", () => {
     await new Promise((r) => setTimeout(r, 10));
     assert.strictEqual(calls.length, 1);
     assert.deepStrictEqual(seen, [{ state: "online", ping: 42 }]);
+  });
+
+  test("negated hardware mapping matches any operator except the configured value", async () => {
+    const calls = [];
+    const probe = async () => {
+      calls.push("probe");
+      return { state: "online", ping: 50 };
+    };
+    const seen = [];
+    const ev = createEvaluator({
+      config: makeConfig({}, [
+        {
+          path: "networking.lte.connectionText",
+          matchValue: "No service",
+          negate: true,
+          resultingState: "online",
+        },
+      ]),
+      onState: (state, ping) => seen.push({ state, ping }),
+      probe,
+    });
+    // An actual operator name differs from "No service" -> match.
+    ev.set("networking.lte.connectionText", "Telia");
+    assert.deepStrictEqual(seen, []);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.strictEqual(calls.length, 1);
+    assert.deepStrictEqual(seen, [{ state: "online", ping: 50 }]);
+  });
+
+  test("negated hardware mapping does not match the excluded value", () => {
+    const seen = [];
+    const ev = createEvaluator({
+      config: makeConfig({}, [
+        {
+          path: "networking.lte.connectionText",
+          matchValue: "No service",
+          negate: true,
+          resultingState: "offline",
+        },
+      ]),
+      onState: (state, ping) => seen.push({ state, ping }),
+    });
+    ev.set("networking.lte.connectionText", "No service");
+    // The excluded value must NOT match.
+    assert.deepStrictEqual(seen, []);
+  });
+
+  test("negated hardware down mapping transitions to offline for any other value", () => {
+    const seen = [];
+    const ev = createEvaluator({
+      config: makeConfig({}, [
+        {
+          path: "network.providers.starlink.status",
+          matchValue: "disconnected",
+          negate: true,
+          resultingState: "offline",
+        },
+      ]),
+      onState: (state, ping) => seen.push({ state, ping }),
+    });
+    ev.setOverride("online");
+    seen.length = 0;
+    ev.set("network.providers.starlink.status", "connected");
+    ev.setOverride(null);
+    assert.deepStrictEqual(seen, [{ state: "offline", ping: null }]);
   });
 
   test("hardware down mapping transitions to offline instantly (0ms)", () => {

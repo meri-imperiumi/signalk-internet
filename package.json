@@ -23,12 +23,13 @@
   ],
   "author": "Henri Bergius <henri.bergius@iki.fi>",
   "license": "EUPL-1.2",
-  "signalk-plugin-enabled-by-default": false,
+  "signalk-plugin-enabled-by-default": true,
   "signalk": {
     "displayName": "Internet Connectivity Monitor",
-    "requires": [],
+    "appIcon": "./icon.png",
     "recommends": [
-      "@meri-imperiumi/signalk-history-sqlite"
+      "signalk-starlink",
+      "@meri-imperiumi/signalk-teltonika-rutx11"
     ]
   },
   "engines": {

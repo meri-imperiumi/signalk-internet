@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Internet Connectivity Monitor</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fff;
+        --fg: #1a1a1a;
+        --muted: #666;
+        --border: #ddd;
+        --online: #2e7d32;
+        --offline: #c62828;
+        --metered: #f57c00;
+        --captive: #1565c0;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1a1a1a;
+          --fg: #eee;
+          --muted: #999;
+          --border: #444;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 1.5rem 1rem 3rem;
+      }
+      h1 {
+        font-size: 1.4rem;
+        margin: 0 0 1rem;
+      }
+      si-app {
+        display: block;
+      }
+    </style>
+    <script type="module" src="./components/status-card.js"></script>
+    <script type="module" src="./components/history-log.js"></script>
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <main>
+      <h1>Internet Connectivity Monitor</h1>
+      <si-app></si-app>
+    </main>
+  </body>
+</html>

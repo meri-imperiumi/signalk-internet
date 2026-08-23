@@ -1,0 +1,41 @@
+{
+  "name": "@meri-imperiumi/signalk-internet",
+  "version": "0.1.0",
+  "description": "Centralized internet connectivity state detection for Signal K",
+  "main": "index.js",
+  "scripts": {
+    "format": "npx @biomejs/biome check --use-editorconfig=true --write index.js lib/ test/ public/",
+    "lint": "npx @biomejs/biome check --use-editorconfig=true index.js lib/ public/",
+    "test": "node --test --test-force-exit \"test/*.test.js\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/meri-imperiumi/signalk-internet.git"
+  },
+  "bugs": {
+    "url": "https://github.com/meri-imperiumi/signalk-internet/issues"
+  },
+  "homepage": "https://github.com/meri-imperiumi/signalk-internet#readme",
+  "keywords": [
+    "signalk-node-server-plugin",
+    "signalk-category-utility",
+    "signalk-webapp"
+  ],
+  "author": "Henri Bergius <henri.bergius@iki.fi>",
+  "license": "EUPL-1.2",
+  "signalk-plugin-enabled-by-default": false,
+  "signalk": {
+    "displayName": "Internet Connectivity Monitor",
+    "requires": [],
+    "recommends": [
+      "@meri-imperiumi/signalk-history-sqlite"
+    ]
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@signalk/server-api": "^2.30.0"
+  }
+}

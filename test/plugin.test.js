@@ -4,6 +4,13 @@ const assert = require("node:assert/strict");
 const pluginFactory = require("../index.js");
 
 /**
+ * Deterministic fake probe used by every test so the suite never hits the
+ * network (which can hang on offline/flaky environments). Returns online
+ * by default; tests that need other outcomes pass their own `probe`.
+ */
+const fakeProbe = async () => ({ state: "online", ping: 5 });
+
+/**
  * Mock Signal K app matching the history-sqlite test pattern, extended
  * with a stub router so we can exercise registerWithRouter.
  */
@@ -11,6 +18,7 @@ function createMockApp() {
   let status = "";
   const messages = [];
   const deltaHandlers = [];
+  const subscriptions = [];
   const router = {
     routes: [],
     get(path, h) {
@@ -32,7 +40,8 @@ function createMockApp() {
     },
     getPluginStatus: () => status,
     subscriptionmanager: {
-      subscribe: (_subscription, _unsub, _onError, onDelta) => {
+      subscribe: (subscription, _unsub, _onError, onDelta) => {
+        subscriptions.push(subscription);
         deltaHandlers.push(onDelta);
       },
     },
@@ -41,6 +50,7 @@ function createMockApp() {
     },
     getMessages: () => messages,
     getDeltaHandlers: () => deltaHandlers,
+    getSubscriptions: () => subscriptions,
     router,
   };
 }
@@ -81,7 +91,9 @@ describe("plugin", () => {
   });
 
   test("starts and stops without error", () => {
-    assert.doesNotThrow(() => plugin.start({ pollInterval: 1 }));
+    assert.doesNotThrow(() =>
+      plugin.start({ pollInterval: 1, probe: fakeProbe }),
+    );
     assert.doesNotThrow(() => plugin.stop());
   });
 
@@ -96,8 +108,27 @@ describe("plugin", () => {
     );
   });
 
+  test("schema ships a watch-schedule default in stateHeuristics", () => {
+    assert.deepStrictEqual(
+      plugin.schema.properties.stateHeuristics.default,
+      pluginFactory.DEFAULT_STATE_HEURISTICS,
+    );
+    assert.strictEqual(
+      pluginFactory.DEFAULT_STATE_HEURISTICS[0].path,
+      "watch.state.onWatch",
+    );
+    assert.strictEqual(
+      pluginFactory.DEFAULT_STATE_HEURISTICS[0].triggerValue,
+      "true",
+    );
+    assert.strictEqual(
+      pluginFactory.DEFAULT_STATE_HEURISTICS[0].resultingState,
+      "metered",
+    );
+  });
+
   test("applies the Starlink default when connectionMappings is unset", () => {
-    plugin.start({ pollInterval: 60 });
+    plugin.start({ pollInterval: 60, probe: fakeProbe });
     plugin.registerWithRouter(app.router);
     // Establish a non-offline state so a transition is observable.
     const put = app.router.routes.find(
@@ -126,15 +157,40 @@ describe("plugin", () => {
     plugin.stop();
   });
 
+  test("subscribes to the watch path via the default heuristic", () => {
+    plugin.start({ pollInterval: 60, probe: fakeProbe });
+    // The default watch heuristic must be active and subscribed, so the
+    // evaluator's stream cache updates when watch.state.onWatch changes.
+    // (The metered refinement itself is unit-tested in evaluator.test.js
+    // with a fake probe; here we assert the default is wired in.)
+    const subs = app.getSubscriptions();
+    assert.strictEqual(subs.length, 1);
+    const paths = subs[0].subscribe.map((s) => s.path);
+    assert.ok(
+      paths.includes("watch.state.onWatch"),
+      `expected watch.state.onWatch in ${JSON.stringify(paths)}`,
+    );
+    assert.ok(
+      paths.includes("network.providers.starlink.status"),
+      `expected the Starlink default path in ${JSON.stringify(paths)}`,
+    );
+    plugin.stop();
+  });
+
   test("respects an explicit empty connectionMappings (disables defaults)", () => {
-    plugin.start({ pollInterval: 60, connectionMappings: [] });
+    plugin.start({
+      pollInterval: 60,
+      probe: fakeProbe,
+      connectionMappings: [],
+      stateHeuristics: [],
+    });
     // With no mappings and no heuristics, no delta subscription is set up.
     assert.strictEqual(app.getDeltaHandlers().length, 0);
     plugin.stop();
   });
 
   test("publishes a meta delta on start", () => {
-    plugin.start({ pollInterval: 60 });
+    plugin.start({ pollInterval: 60, probe: fakeProbe });
     const meta = app.getMessages().find((m) => {
       const u = m.delta.updates || [];
       return u.some((x) => x.meta);
@@ -143,9 +199,15 @@ describe("plugin", () => {
     plugin.stop();
   });
 
-  test("feeds watched delta paths into the evaluator", () => {
+  test("feeds watched delta paths into the evaluator", async () => {
+    // Inject a fake probe so the test is deterministic and never hits the
+    // network. An `online` override needs reachability confirmed before
+    // it publishes, so the probe returns online to establish a
+    // non-offline baseline for the down transition.
+    const probe = async () => ({ state: "online", ping: 5 });
     plugin.start({
       pollInterval: 60,
+      probe,
       connectionMappings: [
         {
           path: "network.providers.starlink.status",
@@ -156,11 +218,13 @@ describe("plugin", () => {
     });
     plugin.registerWithRouter(app.router);
     // Establish a non-offline state via override so the down transition is
-    // observable (publishing offline-from-offline is deduped).
+    // observable (publishing offline-from-offline is deduped). The `online`
+    // override is reachability-gated, so await its verify probe.
     const put = app.router.routes.find(
       (r) => r.method === "put" && r.path === "/override",
     );
     put.handler({ body: { state: "online" } }, makeRes());
+    await new Promise((r) => setTimeout(r, 10));
     app.getMessages().length = 0;
 
     const handler = app.getDeltaHandlers()[0];
@@ -195,7 +259,7 @@ describe("plugin", () => {
   });
 
   test("registerWithRouter wires override and speedtest routes", () => {
-    plugin.start({ pollInterval: 60 });
+    plugin.start({ pollInterval: 60, probe: fakeProbe });
     plugin.registerWithRouter(app.router);
     const methods = app.router.routes.map((r) => `${r.method} ${r.path}`);
     assert.ok(methods.includes("put /override"));
@@ -204,7 +268,7 @@ describe("plugin", () => {
   });
 
   test("override PUT sets the manual override state", () => {
-    plugin.start({ pollInterval: 60 });
+    plugin.start({ pollInterval: 60, probe: fakeProbe });
     plugin.registerWithRouter(app.router);
     const put = app.router.routes.find(
       (r) => r.method === "put" && r.path === "/override",
@@ -217,7 +281,7 @@ describe("plugin", () => {
   });
 
   test("override PUT accepts the legacy forceMetered boolean", () => {
-    plugin.start({ pollInterval: 60 });
+    plugin.start({ pollInterval: 60, probe: fakeProbe });
     plugin.registerWithRouter(app.router);
     const put = app.router.routes.find(
       (r) => r.method === "put" && r.path === "/override",
@@ -229,7 +293,7 @@ describe("plugin", () => {
   });
 
   test("override PUT rejects an unknown body with 400", () => {
-    plugin.start({ pollInterval: 60 });
+    plugin.start({ pollInterval: 60, probe: fakeProbe });
     plugin.registerWithRouter(app.router);
     const put = app.router.routes.find(
       (r) => r.method === "put" && r.path === "/override",
@@ -241,7 +305,7 @@ describe("plugin", () => {
   });
 
   test("speedtest POST returns 403 when metered", () => {
-    plugin.start({ pollInterval: 60 });
+    plugin.start({ pollInterval: 60, probe: fakeProbe });
     plugin.registerWithRouter(app.router);
     // Force the metered state via override so the guard fires.
     const put = app.router.routes.find(
@@ -259,7 +323,7 @@ describe("plugin", () => {
   });
 
   test("speedtest POST returns 409 when offline", () => {
-    plugin.start({ pollInterval: 60 });
+    plugin.start({ pollInterval: 60, probe: fakeProbe });
     plugin.registerWithRouter(app.router);
     const put = app.router.routes.find(
       (r) => r.method === "put" && r.path === "/override",

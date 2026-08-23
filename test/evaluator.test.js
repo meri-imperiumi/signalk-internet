@@ -16,19 +16,85 @@ describe("evaluator", () => {
     assert.strictEqual(ev.current().state, DEFAULT_STATE);
   });
 
-  test("manual override wins and is published immediately", () => {
+  test("manual override to offline is published immediately and absolutely", async () => {
+    const online = async () => ({ state: "online", ping: 5 });
     const seen = [];
     const ev = createEvaluator({
       config: makeConfig(),
       onState: (state) => seen.push(state),
+      probe: online,
     });
-    ev.setOverride("metered");
-    assert.strictEqual(ev.current().state, "metered");
-    assert.deepStrictEqual(seen, ["metered"]);
-    assert.strictEqual(ev.getOverride(), "metered");
+    // offline is the floor — forcing it can never lie, so it's absolute
+    // and synchronous (no probe needed). Establish a non-offline state
+    // first so the transition is observable (publishing
+    // offline-from-offline is deduped); the `online` override is
+    // reachability-gated, so await its probe.
+    ev.setOverride("online");
+    await new Promise((r) => setTimeout(r, 10));
+    seen.length = 0;
+    ev.setOverride("offline");
+    assert.strictEqual(ev.current().state, "offline");
+    assert.deepStrictEqual(seen, ["offline"]);
+    assert.strictEqual(ev.getOverride(), "offline");
   });
 
-  test("clearing override falls through to rules", () => {
+  test("metered override is honored when reachable, else stays offline", async () => {
+    const online = async () => ({ state: "online", ping: 20 });
+    const seen = [];
+    const ev = createEvaluator({
+      config: makeConfig(),
+      onState: (state, ping) => seen.push({ state, ping }),
+      probe: online,
+    });
+    ev.setOverride("metered");
+    // No synchronous publish — the override is gated on a probe.
+    assert.deepStrictEqual(seen, []);
+    await new Promise((r) => setTimeout(r, 10));
+    // Probe confirms reachability, so the override wins.
+    assert.strictEqual(ev.current().state, "metered");
+    assert.strictEqual(ev.getOverride(), "metered");
+    assert.deepStrictEqual(seen, [{ state: "metered", ping: 20 }]);
+  });
+
+  test("metered override falls back to offline when the uplink is down", async () => {
+    let reachable = true;
+    const probe = async () =>
+      reachable
+        ? { state: "online", ping: 10 }
+        : { state: "offline", ping: null };
+    const seen = [];
+    const ev = createEvaluator({
+      config: makeConfig(),
+      onState: (state, ping) => seen.push({ state, ping }),
+      probe,
+    });
+    // Establish a non-offline published state first so the fallback is
+    // observable (publishing offline-from-offline is deduped).
+    ev.setOverride("online");
+    await new Promise((r) => setTimeout(r, 10));
+    seen.length = 0;
+    // Drop the uplink, then force metered: it can't manufacture
+    // connectivity, so the state must fall back to offline.
+    reachable = false;
+    ev.setOverride("metered");
+    await new Promise((r) => setTimeout(r, 10));
+    assert.strictEqual(ev.current().state, "offline");
+    assert.deepStrictEqual(seen, [{ state: "offline", ping: null }]);
+  });
+
+  test("online override is honored when reachable", async () => {
+    const online = async () => ({ state: "online", ping: 15 });
+    const ev = createEvaluator({
+      config: makeConfig(),
+      probe: online,
+    });
+    ev.setOverride("online");
+    await new Promise((r) => setTimeout(r, 10));
+    assert.strictEqual(ev.current().state, "online");
+  });
+
+  test("clearing override falls through to rules", async () => {
+    const probe = async () => ({ state: "online", ping: 30 });
     const ev = createEvaluator({
       config: makeConfig({
         heuristics: [
@@ -39,6 +105,7 @@ describe("evaluator", () => {
           },
         ],
       }),
+      probe,
     });
     ev.setOverride("offline");
     assert.strictEqual(ev.current().state, "offline");
@@ -47,11 +114,15 @@ describe("evaluator", () => {
     // matches on the re-evaluation triggered by setOverride(null).
     ev.set("watch.state.onWatch", true);
     ev.setOverride(null);
+    // Reachability resolves via the probe (online), then the on-watch
+    // heuristic refines it to metered.
+    await new Promise((r) => setTimeout(r, 10));
     assert.strictEqual(ev.current().state, "metered");
     assert.strictEqual(ev.getOverride(), null);
   });
 
-  test("heuristic rule matches a watched path", () => {
+  test("on-watch heuristic refines a reachable base to metered", async () => {
+    const probe = async () => ({ state: "online", ping: 25 });
     const ev = createEvaluator({
       config: makeConfig({
         heuristics: [
@@ -62,12 +133,79 @@ describe("evaluator", () => {
           },
         ],
       }),
+      probe,
     });
     ev.set("watch.state.onWatch", true);
+    await new Promise((r) => setTimeout(r, 10));
+    // online base + on-watch -> metered.
     assert.strictEqual(ev.current().state, "metered");
   });
 
-  test("negated heuristic matches when value differs from triggerValue", () => {
+  test("on-watch heuristic does not upgrade an offline base", async () => {
+    const probe = async () => ({ state: "offline", ping: null });
+    const seen = [];
+    const ev = createEvaluator({
+      config: makeConfig({
+        heuristics: [
+          {
+            path: "watch.state.onWatch",
+            triggerValue: "true",
+            resultingState: "metered",
+          },
+        ],
+      }),
+      onState: (state, ping) => seen.push({ state, ping }),
+      probe,
+    });
+    ev.set("watch.state.onWatch", true);
+    await new Promise((r) => setTimeout(r, 10));
+    // No internet -> stays offline; the heuristic can't manufacture
+    // connectivity it doesn't have.
+    assert.strictEqual(ev.current().state, "offline");
+  });
+
+  test("heuristic does not downgrade captive below its severity", async () => {
+    const probe = async () => ({ state: "captive", ping: 80 });
+    const ev = createEvaluator({
+      config: makeConfig({
+        heuristics: [
+          {
+            path: "watch.state.onWatch",
+            triggerValue: "true",
+            resultingState: "metered",
+          },
+        ],
+      }),
+      probe,
+    });
+    ev.set("watch.state.onWatch", true);
+    await new Promise((r) => setTimeout(r, 10));
+    // captive (severity 2) is worse than metered (1); heuristic can't
+    // weaken it, so the state stays captive.
+    assert.strictEqual(ev.current().state, "captive");
+  });
+
+  test("offline-forcing heuristic overrides any reachable base", async () => {
+    const probe = async () => ({ state: "online", ping: 25 });
+    const ev = createEvaluator({
+      config: makeConfig({
+        heuristics: [
+          {
+            path: "environment.indoors",
+            triggerValue: "true",
+            resultingState: "offline",
+          },
+        ],
+      }),
+      probe,
+    });
+    ev.set("environment.indoors", true);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.strictEqual(ev.current().state, "offline");
+  });
+
+  test("negated heuristic matches when value differs from triggerValue", async () => {
+    const probe = async () => ({ state: "online", ping: 25 });
     const ev = createEvaluator({
       config: makeConfig({
         heuristics: [
@@ -79,8 +217,10 @@ describe("evaluator", () => {
           },
         ],
       }),
+      probe,
     });
     ev.set("watch.state.onWatch", false);
+    await new Promise((r) => setTimeout(r, 10));
     assert.strictEqual(ev.current().state, "metered");
   });
 
@@ -195,7 +335,8 @@ describe("evaluator", () => {
     assert.deepStrictEqual(seen, []);
   });
 
-  test("negated hardware down mapping transitions to offline for any other value", () => {
+  test("negated hardware down mapping transitions to offline for any other value", async () => {
+    const online = async () => ({ state: "online", ping: 10 });
     const seen = [];
     const ev = createEvaluator({
       config: makeConfig({}, [
@@ -207,15 +348,18 @@ describe("evaluator", () => {
         },
       ]),
       onState: (state, ping) => seen.push({ state, ping }),
+      probe: online,
     });
     ev.setOverride("online");
+    await new Promise((r) => setTimeout(r, 10));
     seen.length = 0;
     ev.set("network.providers.starlink.status", "connected");
     ev.setOverride(null);
     assert.deepStrictEqual(seen, [{ state: "offline", ping: null }]);
   });
 
-  test("hardware down mapping transitions to offline instantly (0ms)", () => {
+  test("hardware down mapping transitions to offline instantly (0ms)", async () => {
+    const online = async () => ({ state: "online", ping: 10 });
     const seen = [];
     const ev = createEvaluator({
       config: makeConfig({}, [
@@ -226,9 +370,12 @@ describe("evaluator", () => {
         },
       ]),
       onState: (state, ping) => seen.push({ state, ping }),
+      probe: online,
     });
     // Establish a non-offline state so the down transition is observable.
+    // `online` override is reachability-gated, so await its probe.
     ev.setOverride("online");
+    await new Promise((r) => setTimeout(r, 10));
     seen.length = 0;
     // Seed the down value, then clear the override so the hardware rule
     // fires on re-evaluation.
@@ -269,7 +416,8 @@ describe("evaluator", () => {
     assert.strictEqual(ev.current().ping, 12);
   });
 
-  test("override beats a matching heuristic", () => {
+  test("override beats a matching heuristic", async () => {
+    const online = async () => ({ state: "online", ping: 10 });
     const ev = createEvaluator({
       config: makeConfig({
         heuristics: [
@@ -280,9 +428,13 @@ describe("evaluator", () => {
           },
         ],
       }),
+      probe: online,
     });
     ev.set("watch.state.onWatch", true);
     ev.setOverride("online");
+    await new Promise((r) => setTimeout(r, 10));
+    // The online override wins over the metered heuristic, and is gated
+    // on reachability (probe says online) so it publishes online.
     assert.strictEqual(ev.current().state, "online");
   });
 

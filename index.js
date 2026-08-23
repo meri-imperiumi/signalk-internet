@@ -45,6 +45,29 @@ const DEFAULT_CONNECTION_MAPPINGS = [
 ];
 
 /**
+ * Default contextual state rules shipped out of the box.
+ *
+ * While a watch schedule is running the vessel is typically offshore on
+ * a metered uplink (satellite, roaming SIM), so we conservatively assume
+ * `metered` to keep downstream plugins from burning expensive bandwidth.
+ * Heuristics are modifiers, not verdicts: this rule only clamps an
+ * already-reachable base state down to `metered` — when there is no
+ * internet (dish down, no LTE) the state stays `offline` rather than
+ * falsely reporting a metered connection. The Signal K core publishes
+ * `watch.state.onWatch` as a boolean; the evaluator coerces both sides to
+ * strings before comparing, so a boolean `true` matches the configured
+ * `triggerValue: "true"`. A user who wants a different assumption (or
+ * none) can edit or clear the list.
+ */
+const DEFAULT_STATE_HEURISTICS = [
+  {
+    path: "watch.state.onWatch",
+    triggerValue: "true",
+    resultingState: "metered",
+  },
+];
+
+/**
  * @param {ServerAPI} app - Signal K server API
  * @returns {Plugin}
  */
@@ -70,7 +93,10 @@ module.exports = (app) => {
         },
         stateHeuristics: {
           type: "array",
-          title: "Contextual State Rules",
+          title: "Contextual State Rules (refine reachability)",
+          default: DEFAULT_STATE_HEURISTICS,
+          description:
+            "Heuristics refine an already-resolved reachability state and can only make it more severe (online < metered < captive < offline). They never create connectivity the uplink/probe didn't establish, so a 'metered when on watch' rule has no effect when the internet is actually down.",
           items: {
             type: "object",
             properties: {
@@ -123,6 +149,10 @@ module.exports = (app) => {
           raw.connectionMappings === undefined
             ? DEFAULT_CONNECTION_MAPPINGS
             : raw.connectionMappings,
+        stateHeuristics:
+          raw.stateHeuristics === undefined
+            ? DEFAULT_STATE_HEURISTICS
+            : raw.stateHeuristics,
       };
 
       /**
@@ -150,9 +180,11 @@ module.exports = (app) => {
 
       /**
        * Active probe wrapper used by the evaluator. Uses the retrying
-       * variant to ride through transient DNS hiccups.
+       * variant to ride through transient DNS hiccups. Tests may inject a
+       * custom probe via `options.probe` to avoid hitting the network.
        */
-      const probe = () => probeWithRetry();
+      const probe =
+        typeof raw.probe === "function" ? raw.probe : () => probeWithRetry();
 
       evaluator = createEvaluator({ config, onState: publish, probe });
 
@@ -303,15 +335,27 @@ module.exports = (app) => {
     /**
      * POST /speedtest — run a guarded server-side download test.
      * 403 when metered, 409 when offline.
+     *
+     * The guard honors a manual override's intent immediately (a forced
+     * `offline` blocks with 409, a forced `metered` blocks with 403) even
+     * before the reachability probe that gates the *published* state has
+     * resolved — a user who forces metered explicitly asks us to hold off
+     * on bandwidth, so we shouldn't run a speedtest while we verify.
      */
     router.post("/speedtest", (_req, res) => {
       if (!evaluator) {
         res.status(503).json({ message: "Plugin not started" });
         return;
       }
+      const override = evaluator.getOverride();
       const { state } = evaluator.current();
+      // Effective guard state: override intent wins for the explicit
+      // bandwidth-blocking cases; otherwise fall back to the resolved
+      // (probe-gated) state.
+      const guardState =
+        override === "offline" || override === "metered" ? override : state;
       try {
-        guard(state);
+        guard(guardState);
       } catch (err) {
         if (err instanceof GuardError) {
           res.status(err.status).json({ message: err.message });
@@ -359,3 +403,4 @@ module.exports.PLUGIN_ID = PLUGIN_ID;
 module.exports.STATE_PATH = STATE_PATH;
 module.exports.PING_PATH = PING_PATH;
 module.exports.DEFAULT_CONNECTION_MAPPINGS = DEFAULT_CONNECTION_MAPPINGS;
+module.exports.DEFAULT_STATE_HEURISTICS = DEFAULT_STATE_HEURISTICS;

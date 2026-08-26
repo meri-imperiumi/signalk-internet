@@ -1,50 +1,73 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-mode="day">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Internet Connectivity Monitor</title>
     <style>
+      /* --- Tactical Sci-Fi color system (spec §4) --- */
       :root {
-        color-scheme: light dark;
-        --bg: #fff;
-        --fg: #1a1a1a;
-        --muted: #666;
-        --border: #ddd;
-        --online: #2e7d32;
-        --offline: #c62828;
-        --metered: #f57c00;
-        --captive: #1565c0;
+        /* Canvas */
+        --bg-base: #080a0c;
+        --bg-panel: #111414;
+        --bg-panel-muted: #0a0c0c;
+
+        /* Semantic themes */
+        --color-green: #6b9e78; /* Standard / Nominal operation */
+        --color-teal: #4b8b99; /* Surplus / Primary active systems */
+        --color-orange: #c77b28; /* Warning / Degraded / Alternate power */
+        --color-red: #c94b4b; /* CRITICAL / Alarm / Danger */
+        --color-grey: #444444; /* Offline / Inactive */
+
+        /* Typography */
+        --text-main: #ffffff;
+        --text-muted: #888899;
       }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --bg: #1a1a1a;
-          --fg: #eee;
-          --muted: #999;
-          --border: #444;
-        }
+
+      /* Night mode: dim the canvas and mute accent saturation slightly.
+         Applied by the host (or this app's stream listener) via the
+         data-mode attribute on <html>. */
+      html[data-mode="night"] {
+        --bg-base: #050607;
+        --bg-panel: #0b0d0e;
+        --bg-panel-muted: #070809;
+        --text-muted: #6a6a78;
       }
+
       * {
         box-sizing: border-box;
       }
+
+      html,
+      body {
+        height: 100%;
+      }
+
       body {
         margin: 0;
-        font-family:
-          system-ui,
-          -apple-system,
-          sans-serif;
-        background: var(--bg);
-        color: var(--fg);
+        font-family: system-ui, -apple-system, sans-serif;
+        background: var(--bg-base);
+        color: var(--text-main);
+        -webkit-font-smoothing: antialiased;
       }
+
       main {
-        max-width: 760px;
-        margin: 0 auto;
-        padding: 1.5rem 1rem 3rem;
+        /* Fluid layout: collapse to single column on mobile, widen on
+           larger nav-station displays. */
+        width: min(100% - 2rem, 1100px);
+        margin-inline: auto;
+        padding-block: clamp(1rem, 2.5vw, 2rem);
       }
+
       h1 {
-        font-size: 1.4rem;
-        margin: 0 0 1rem;
+        font-size: clamp(1.1rem, 1rem + 1vw, 1.6rem);
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--color-teal);
+        margin: 0 0 1.25rem;
       }
+
       si-app {
         display: block;
       }

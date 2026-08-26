@@ -4,6 +4,10 @@
  * changes. Works with any history provider (e.g. signalk-history-sqlite)
  * — no custom database needed.
  *
+ * Styled per the Signal K "Tactical Sci-Fi" UI spec: flat geometry,
+ * corner-bracket framing, semantic neon segments, hardware-style
+ * controls and monospace telemetry.
+ *
  * @file history-log.js
  */
 
@@ -12,12 +16,21 @@ const HISTORY_BASE = "/signalk/v2/api/history/values";
 // Default to the last 7 days. The v2 API accepts from/to ISO timestamps.
 const DEFAULT_DAYS = 7;
 
-const STATE_COLORS = {
-  online: "var(--online)",
-  offline: "var(--offline)",
-  metered: "var(--metered)",
-  captive: "var(--captive)",
+/** Map state -> theme color (spec §4 semantic neon). */
+const STATE_COLOR = {
+  online: "var(--color-green)",
+  metered: "var(--color-orange)",
+  offline: "var(--color-red)",
+  captive: "var(--color-teal)",
+  unknown: "var(--color-grey)",
 };
+
+const LEGEND_ITEMS = [
+  ["online", "Online"],
+  ["metered", "Metered"],
+  ["captive", "Captive"],
+  ["offline", "Offline"],
+];
 
 class SiHistoryLog extends HTMLElement {
   constructor() {
@@ -26,86 +39,212 @@ class SiHistoryLog extends HTMLElement {
     shadow.innerHTML = `
       <style>
         :host { display: block; }
-        h2 { font-size: 1.1rem; margin: 0 0 0.75rem; }
+
+        .sk-card {
+          --theme-color: var(--color-teal);
+          position: relative;
+          display: block;
+          background: var(--bg-panel);
+          color: var(--text-main);
+          padding: 1.25rem 1.5rem 1.5rem;
+          margin-bottom: 1.5rem;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        /* Corner brackets (spec §3). */
+        .sk-card::before,
+        .sk-card::after {
+          content: "";
+          position: absolute;
+          width: 14px;
+          height: 14px;
+          border: 2px solid var(--theme-color);
+          pointer-events: none;
+        }
+        .sk-card::before {
+          top: -1px;
+          left: -1px;
+          border-right: none;
+          border-bottom: none;
+        }
+        .sk-card::after {
+          bottom: -1px;
+          right: -1px;
+          border-left: none;
+          border-top: none;
+        }
+
+        h2 {
+          font-size: 0.85rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          color: var(--theme-color);
+          margin: 0 0 0.9rem;
+        }
+
         .controls {
           display: flex;
-          gap: 0.5rem;
+          gap: 0.75rem;
           align-items: center;
-          margin-bottom: 0.75rem;
+          margin-bottom: 1rem;
+          flex-wrap: wrap;
+        }
+
+        .field-label {
+          font-size: 0.85rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          color: var(--text-muted);
+          margin-right: 0.4rem;
+        }
+
+        /* Hardware-style select (spec §6). */
+        .select-wrap {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+        }
+        .select-wrap::after {
+          content: "▾";
+          position: absolute;
+          right: 0.35rem;
+          font-size: 0.7rem;
+          color: var(--theme-color);
+          pointer-events: none;
+        }
+        select {
+          appearance: none;
+          -webkit-appearance: none;
+          font-family: ui-monospace, "Fira Code", monospace;
           font-size: 0.9rem;
+          color: var(--text-main);
+          background: transparent;
+          border: none;
+          border-bottom: 2px solid var(--color-grey);
+          padding: 0.5rem 1.25rem 0.4rem 0.4rem;
+          min-height: 48px;
+          cursor: pointer;
+          transition: border-color 0.15s ease;
         }
-        select, button {
-          font: inherit;
-          padding: 0.3rem 0.5rem;
-          border-radius: 0.35rem;
-          border: 1px solid var(--border);
-          background: var(--bg);
-          color: var(--fg);
+        select:focus,
+        select:hover {
+          outline: none;
+          border-bottom-color: var(--theme-color);
         }
+
+        /* Bracket button. */
+        button {
+          appearance: none;
+          -webkit-appearance: none;
+          font-family: ui-monospace, "Fira Code", monospace;
+          font-size: 0.9rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: var(--theme-color);
+          background: transparent;
+          border: 1px solid var(--theme-color);
+          padding: 0 1rem;
+          min-height: 48px;
+          cursor: pointer;
+          transition:
+            background-color 0.12s ease,
+            color 0.12s ease;
+        }
+        button:hover,
+        button:active {
+          background-color: var(--theme-color);
+          color: var(--bg-base);
+        }
+
+        /* Proportional timeline — sharp flat segments (spec §3). */
         .timeline {
           display: flex;
-          height: 1.75rem;
-          border-radius: 0.35rem;
+          height: 2rem;
           overflow: hidden;
-          border: 1px solid var(--border);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: var(--bg-panel-muted);
         }
         .segment {
           flex: 1 0 auto;
           min-width: 2px;
+          height: 100%;
         }
+
         .legend {
           display: flex;
           flex-wrap: wrap;
-          gap: 0.75rem;
-          margin-top: 0.6rem;
-          font-size: 0.85rem;
-          color: var(--muted);
+          gap: 0.9rem;
+          margin-top: 0.75rem;
+          font-size: 0.8rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: var(--text-muted);
         }
         .legend span {
           display: inline-flex;
           align-items: center;
-          gap: 0.3rem;
+          gap: 0.4rem;
         }
         .swatch {
           width: 0.7rem;
           height: 0.7rem;
-          border-radius: 50%;
           display: inline-block;
         }
+
         .events {
-          margin-top: 1rem;
-          font-size: 0.85rem;
-          list-style: none;
+          margin: 1.1rem 0 0;
           padding: 0;
-          max-height: 12rem;
+          list-style: none;
+          max-height: 14rem;
           overflow-y: auto;
         }
         .events li {
-          padding: 0.25rem 0;
-          border-bottom: 1px solid var(--border);
+          font-family: ui-monospace, "Fira Code", monospace;
+          font-size: 0.85rem;
+          font-variant-numeric: tabular-nums;
+          padding: 0.45rem 0;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
         .events time {
-          color: var(--muted);
-          margin-right: 0.5rem;
+          color: var(--text-muted);
+          margin-right: 0.6rem;
         }
-        .empty { color: var(--muted); font-size: 0.9rem; }
+        .events .marker {
+          margin-right: 0.35rem;
+        }
+
+        .empty {
+          color: var(--text-muted);
+          font-size: 0.85rem;
+          margin-top: 0.75rem;
+        }
+
+        @media (max-width: 600px) {
+          .sk-card {
+            padding: 1rem 1.1rem 1.25rem;
+          }
+        }
       </style>
-      <h2>Connection history</h2>
-      <div class="controls">
-        <label>
-          Window:
-          <select id="window">
-            <option value="1">24h</option>
-            <option value="7" selected>7d</option>
-            <option value="30">30d</option>
-          </select>
-        </label>
-        <button id="refresh">Refresh</button>
+      <div class="sk-card">
+        <h2>Connection history</h2>
+        <div class="controls">
+          <span class="field-label">Window</span>
+          <span class="select-wrap">
+            <select id="window">
+              <option value="1">24h</option>
+              <option value="7" selected>7d</option>
+              <option value="30">30d</option>
+            </select>
+          </span>
+          <button id="refresh">[ Refresh ]</button>
+        </div>
+        <div class="timeline" id="timeline"></div>
+        <div class="legend" id="legend"></div>
+        <ul class="events" id="events"></ul>
+        <p class="empty" id="empty">No history available.</p>
       </div>
-      <div class="timeline" id="timeline"></div>
-      <div class="legend" id="legend"></div>
-      <ul class="events" id="events"></ul>
-      <p class="empty" id="empty">No history available.</p>
     `;
     /** @type {HTMLSelectElement} */
     this.windowEl = shadow.getElementById("window");
@@ -130,18 +269,10 @@ class SiHistoryLog extends HTMLElement {
   }
 
   renderLegend() {
-    const items = [
-      ["online", "Online"],
-      ["metered", "Metered"],
-      ["captive", "Captive"],
-      ["offline", "Offline"],
-    ];
-    this.legendEl.innerHTML = items
-      .map(
-        ([key, label]) =>
-          `<span><i class="swatch" style="background:${STATE_COLORS[key]}"></i>${label}</span>`,
-      )
-      .join("");
+    this.legendEl.innerHTML = LEGEND_ITEMS.map(
+      ([key, label]) =>
+        `<span><i class="swatch" style="background:${STATE_COLOR[key]}"></i>${label}</span>`,
+    ).join("");
   }
 
   async load() {
@@ -207,7 +338,7 @@ class SiHistoryLog extends HTMLElement {
     this.timelineEl.innerHTML = segments
       .map(
         (s) =>
-          `<div class="segment" style="width:${s.width}%;background:${STATE_COLORS[s.value] || "var(--muted)"}" title="${s.value}"></div>`,
+          `<div class="segment" style="width:${s.width}%;background:${STATE_COLOR[s.value] || STATE_COLOR.unknown}" title="${s.value}"></div>`,
       )
       .join("");
 
@@ -226,7 +357,8 @@ class SiHistoryLog extends HTMLElement {
       .slice(0, 50)
       .map((t) => {
         const time = new Date(t.ts).toLocaleString();
-        return `<li><time>${time}</time><span style="color:${STATE_COLORS[t.value] || "var(--muted)"}">●</span> ${t.value}</li>`;
+        const color = STATE_COLOR[t.value] || STATE_COLOR.unknown;
+        return `<li><time>${time}</time><span class="marker" style="color:${color}">●</span>${t.value}</li>`;
       })
       .join("");
   }

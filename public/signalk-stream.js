@@ -10,6 +10,7 @@
 
 const STATE_PATH = "network.internet.state";
 const PING_PATH = "network.internet.ping";
+const MODE_PATH = "vessels.self.environment.mode";
 
 class SignalKStream {
   /**
@@ -39,7 +40,11 @@ class SignalKStream {
       socket.send(
         JSON.stringify({
           context: "vessels.self",
-          subscribe: [{ path: STATE_PATH }, { path: PING_PATH }],
+          subscribe: [
+            { path: STATE_PATH },
+            { path: PING_PATH },
+            { path: MODE_PATH },
+          ],
         }),
       );
     });
@@ -76,4 +81,4 @@ class SignalKStream {
   }
 }
 
-export { PING_PATH, SignalKStream, STATE_PATH };
+export { MODE_PATH, PING_PATH, SignalKStream, STATE_PATH };

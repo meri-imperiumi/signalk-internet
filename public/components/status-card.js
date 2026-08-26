@@ -3,16 +3,22 @@
  * override toggle and a speed-test button that is disabled when the
  * state is metered or offline (bandwidth guard).
  *
+ * Styled per the Signal K "Tactical Sci-Fi" UI spec: flat geometry,
+ * corner-bracket framing, semantic neon theme classes, hardware-style
+ * inputs and bracket toggle buttons.
+ *
  * @file status-card.js
  */
 
 const API_BASE = "/plugins/signalk-internet";
 
-const STATE_COLORS = {
-  online: "var(--online)",
-  offline: "var(--offline)",
-  metered: "var(--metered)",
-  captive: "var(--captive)",
+/** Map connectivity state -> theme class (spec §4 semantic neon). */
+const STATE_THEME = {
+  online: "theme-green",
+  metered: "theme-orange",
+  offline: "theme-red",
+  captive: "theme-teal",
+  unknown: "theme-offline",
 };
 
 const STATE_LABELS = {
@@ -20,7 +26,16 @@ const STATE_LABELS = {
   offline: "Offline",
   metered: "Metered",
   captive: "Captive portal",
+  unknown: "Unknown",
 };
+
+const OVERRIDE_OPTIONS = [
+  ["", "(auto)"],
+  ["online", "online"],
+  ["offline", "offline"],
+  ["metered", "metered"],
+  ["captive", "captive"],
+];
 
 class SiStatusCard extends HTMLElement {
   constructor() {
@@ -29,83 +44,244 @@ class SiStatusCard extends HTMLElement {
     shadow.innerHTML = `
       <style>
         :host { display: block; }
+
+        /* Local theme color defaults to grey/offline; the theme-* class
+           swaps it and tints backgrounds. */
         .card {
-          border: 1px solid var(--border);
-          border-radius: 0.5rem;
-          padding: 1rem 1.25rem;
+          --theme-color: var(--color-grey);
+          --theme-color-rgb: 68, 68, 68;
+
+          position: relative;
+          display: block;
+          background: var(--bg-panel);
+          color: var(--text-main);
+          padding: 1.25rem 1.5rem 1.5rem;
           margin-bottom: 1.5rem;
+          border: 1px solid rgba(255, 255, 255, 0.08);
         }
+
+        /* Corner brackets (spec §3) — 2px L-shapes on each corner. */
+        .card::before,
+        .card::after {
+          content: "";
+          position: absolute;
+          width: 14px;
+          height: 14px;
+          border: 2px solid var(--theme-color);
+          pointer-events: none;
+        }
+        .card::before {
+          top: -1px;
+          left: -1px;
+          border-right: none;
+          border-bottom: none;
+        }
+        .card::after {
+          bottom: -1px;
+          right: -1px;
+          border-left: none;
+          border-top: none;
+        }
+
+        /* Theme classes. */
+        .card.theme-green {
+          --theme-color: var(--color-green);
+          --theme-color-rgb: 107, 158, 120;
+        }
+        .card.theme-teal {
+          --theme-color: var(--color-teal);
+          --theme-color-rgb: 75, 139, 153;
+        }
+        .card.theme-orange {
+          --theme-color: var(--color-orange);
+          --theme-color-rgb: 199, 123, 40;
+        }
+        .card.theme-red {
+          --theme-color: var(--color-red);
+          --theme-color-rgb: 201, 75, 75;
+        }
+        .card.theme-offline {
+          --theme-color: var(--color-grey);
+          --theme-color-rgb: 68, 68, 68;
+        }
+
+        .label {
+          font-size: 0.85rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          color: var(--theme-color);
+          margin-bottom: 0.5rem;
+        }
+
         .state-row {
           display: flex;
-          align-items: center;
+          align-items: baseline;
           gap: 0.75rem;
-          font-size: 1.25rem;
-          font-weight: 600;
+          flex-wrap: wrap;
         }
+
+        .state {
+          font-family: ui-monospace, "Fira Code", monospace;
+          font-size: clamp(2rem, 1.5rem + 2vw, 2.5rem);
+          font-weight: 700;
+          color: var(--text-main);
+          font-variant-numeric: tabular-nums;
+          line-height: 1.1;
+        }
+
         .dot {
           width: 0.85rem;
           height: 0.85rem;
-          border-radius: 50%;
-          background: var(--muted);
+          background: var(--theme-color);
           flex: 0 0 auto;
+          align-self: center;
         }
+
         .ping {
-          color: var(--muted);
-          font-weight: 400;
-          font-size: 0.95rem;
-          margin-left: 0.25rem;
+          font-family: ui-monospace, "Fira Code", monospace;
+          color: var(--text-muted);
+          font-size: 1rem;
+          font-variant-numeric: tabular-nums;
         }
+
         .controls {
-          margin-top: 1rem;
+          margin-top: 1.25rem;
           display: flex;
           flex-wrap: wrap;
           gap: 0.75rem;
           align-items: center;
         }
-        select, button {
-          font: inherit;
-          padding: 0.4rem 0.6rem;
-          border-radius: 0.35rem;
-          border: 1px solid var(--border);
-          background: var(--bg);
-          color: var(--fg);
+
+        .override-group {
+          display: inline-flex;
+          flex-wrap: wrap;
+          gap: 0.75rem;
+          align-items: center;
+        }
+
+        /* The speed test is an independent action; push it to the right
+           edge so it reads as separate from the override controls. */
+        #speedtest {
+          margin-left: auto;
+        }
+
+        .field-label {
+          font-size: 0.85rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          color: var(--text-muted);
+          margin-right: 0.4rem;
+        }
+
+        /* Hardware-style text/select inputs (spec §6). */
+        select {
+          appearance: none;
+          -webkit-appearance: none;
+          font-family: ui-monospace, "Fira Code", monospace;
+          font-size: 0.95rem;
+          color: var(--text-main);
+          background: transparent;
+          border: none;
+          border-bottom: 2px solid var(--color-grey);
+          padding: 0.5rem 1.25rem 0.4rem 0.4rem;
+          min-height: 48px;
+          cursor: pointer;
+          transition: border-color 0.15s ease;
+        }
+        select:focus,
+        select:hover {
+          outline: none;
+          border-bottom-color: var(--theme-color);
+        }
+        /* Custom sharp arrow marker. */
+        .select-wrap {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+        }
+        .select-wrap::after {
+          content: "▾";
+          position: absolute;
+          right: 0.35rem;
+          font-size: 0.7rem;
+          color: var(--theme-color);
+          pointer-events: none;
+        }
+
+        /* Bracket toggle button (spec §6) for the speed test. */
+        button {
+          appearance: none;
+          -webkit-appearance: none;
+          font-family: ui-monospace, "Fira Code", monospace;
+          font-size: 0.9rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: var(--theme-color);
+          background: transparent;
+          border: 1px solid var(--theme-color);
+          padding: 0 1rem;
+          min-height: 48px;
+          cursor: pointer;
+          transition:
+            background-color 0.12s ease,
+            color 0.12s ease;
+        }
+        button:hover:not(:disabled),
+        button:active:not(:disabled) {
+          background-color: var(--theme-color);
+          color: var(--bg-base);
         }
         button:disabled {
-          opacity: 0.5;
+          color: var(--color-grey);
+          border-color: var(--color-grey);
           cursor: not-allowed;
+          opacity: 0.7;
         }
+
         .result {
+          font-family: ui-monospace, "Fira Code", monospace;
           font-size: 0.9rem;
-          color: var(--muted);
-          margin-top: 0.75rem;
+          color: var(--text-muted);
+          margin-top: 0.9rem;
           min-height: 1.2em;
+          font-variant-numeric: tabular-nums;
         }
-        .error {
-          color: var(--offline);
+        .result.error {
+          color: var(--color-red);
+        }
+
+        @media (max-width: 600px) {
+          .card {
+            padding: 1rem 1.1rem 1.25rem;
+          }
         }
       </style>
-      <div class="card">
+      <div class="card theme-offline" id="card">
+        <div class="label">Link status</div>
         <div class="state-row">
           <span class="dot" id="dot"></span>
-          <span id="state">Unknown</span>
+          <span class="state" id="state">UNKNOWN</span>
           <span class="ping" id="ping"></span>
         </div>
         <div class="controls">
-          <label>
-            Override:
-            <select id="override">
-              <option value="">(auto)</option>
-              <option value="online">online</option>
-              <option value="offline">offline</option>
-              <option value="metered">metered</option>
-              <option value="captive">captive</option>
-            </select>
-          </label>
-          <button id="speedtest" disabled>Run speed test</button>
+          <div class="override-group">
+            <span class="field-label">Override</span>
+            <span class="select-wrap">
+              <select id="override">
+                ${OVERRIDE_OPTIONS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}
+              </select>
+            </span>
+            <button id="apply" disabled>[ Apply ]</button>
+          </div>
+          <button id="speedtest" disabled>[ Run speed test ]</button>
         </div>
         <div class="result" id="result"></div>
       </div>
     `;
+    /** @type {HTMLElement} */
+    this.cardEl = shadow.getElementById("card");
     /** @type {HTMLElement} */
     this.dotEl = shadow.getElementById("dot");
     /** @type {HTMLElement} */
@@ -115,15 +291,27 @@ class SiStatusCard extends HTMLElement {
     /** @type {HTMLSelectElement} */
     this.overrideEl = shadow.getElementById("override");
     /** @type {HTMLButtonElement} */
+    this.applyEl = shadow.getElementById("apply");
+    /** @type {HTMLButtonElement} */
     this.speedtestEl = shadow.getElementById("speedtest");
     /** @type {HTMLElement} */
     this.resultEl = shadow.getElementById("result");
 
     this._state = "unknown";
     this._ping = null;
+    // Last override value this client has confirmed with the server.
+    // The Apply button stays disabled until the select differs from it,
+    // so a stray tap on a heeling boat can't change connectivity policy.
+    this._appliedOverride = "";
 
-    this.overrideEl.addEventListener("change", () => this.setOverride());
+    this.overrideEl.addEventListener("change", () => this.syncApplyButton());
+    this.applyEl.addEventListener("click", () => this.setOverride());
     this.speedtestEl.addEventListener("click", () => this.runSpeedTest());
+  }
+
+  /** Enable Apply only when the select differs from the applied override. */
+  syncApplyButton() {
+    this.applyEl.disabled = this.overrideEl.value === this._appliedOverride;
   }
 
   /** @param {string} value */
@@ -140,14 +328,17 @@ class SiStatusCard extends HTMLElement {
 
   render() {
     const s = this._state;
-    this.stateEl.textContent = STATE_LABELS[s] || "Unknown";
-    this.dotEl.style.background = STATE_COLORS[s] || "var(--muted)";
+    this.stateEl.textContent = (STATE_LABELS[s] || "Unknown").toUpperCase();
+    this.cardEl.className = `card ${STATE_THEME[s] || "theme-offline"}`;
     this.pingEl.textContent = this._ping != null ? `· ${this._ping} ms` : "";
     // Disable the speed test whenever the state is metered or offline —
     // the server enforces the same guard, but disabling client-side
     // prevents accidental bandwidth use on satellite links.
     const blocked = s === "metered" || s === "offline";
     this.speedtestEl.disabled = blocked;
+    this.speedtestEl.textContent = blocked
+      ? `[ blocked · ${STATE_LABELS[s] || s} ]`
+      : "[ Run speed test ]";
     this.speedtestEl.title = blocked
       ? `Speed test blocked: ${STATE_LABELS[s]}`
       : "Run a 5 MB download speed test";
@@ -165,9 +356,11 @@ class SiStatusCard extends HTMLElement {
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         this.showResult(`Override failed: ${err.message || res.status}`, true);
-      } else {
-        this.showResult(`Override set to ${value || "auto"}`);
+        return;
       }
+      this._appliedOverride = value;
+      this.syncApplyButton();
+      this.showResult(`Override set to ${value || "auto"}`);
     } catch (e) {
       this.showResult(`Override failed: ${e.message}`, true);
     }
@@ -175,6 +368,7 @@ class SiStatusCard extends HTMLElement {
 
   async runSpeedTest() {
     this.speedtestEl.disabled = true;
+    this.speedtestEl.textContent = "[ running… ]";
     this.showResult("Running speed test…");
     try {
       const res = await fetch(`${API_BASE}/speedtest`, { method: "POST" });

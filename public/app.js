@@ -11,6 +11,7 @@ import "./components/history-log.js";
 
 const STATE_PATH = "network.internet.state";
 const PING_PATH = "network.internet.ping";
+const MODE_PATH = "vessels.self.environment.mode";
 
 class SiApp extends HTMLElement {
   constructor() {
@@ -26,12 +27,18 @@ class SiApp extends HTMLElement {
   }
 
   connectedCallback() {
-    // Live stream: push state/ping deltas to the status card.
+    // Live stream: push state/ping deltas to the status card, and
+    // passively reflect day/night mode onto <html data-mode> (spec §1).
     this.stream = new SignalKStream((path, value) => {
       if (path === STATE_PATH) {
         this.cardEl.state = value;
       } else if (path === PING_PATH) {
         this.cardEl.ping = value;
+      } else if (path === MODE_PATH) {
+        const mode = value === "night" || value === "day" ? value : null;
+        const root = document.documentElement;
+        if (mode) root.setAttribute("data-mode", mode);
+        else root.removeAttribute("data-mode");
       }
     });
     this.stream.connect();

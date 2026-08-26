@@ -27,6 +27,9 @@
   "signalk": {
     "displayName": "Internet Connectivity Monitor",
     "appIcon": "./icon.png",
+    "screenshots": [
+      "doc/internet.png"
+    ],
     "recommends": [
       "signalk-starlink",
       "@meri-imperiumi/signalk-teltonika-rutx11"

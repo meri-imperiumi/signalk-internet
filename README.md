@@ -3,7 +3,7 @@
 This plugin serves as an internet connectivity monitor for Signal K. Many Signal K plugins interact with internet-based services, and this plugin provides the necessary deltas for them to know if the boat is connected or not.
 
 * `network.internet.state`: `online`, `offline`, `metered`
-* `network.internet.pink`: round-trip ping time to a verification endpoint
+* `network.internet.ping`: round-trip ping time to a verification endpoint
 
 In addition to its own detection logic, the plugin can read status from uplink-specific provider plugins. Examples:
 

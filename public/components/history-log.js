@@ -1,20 +1,29 @@
 /**
  * History log: queries the standard Signal K v2 History API for
- * `network.internet.state` and renders a timeline of connectivity
- * changes. Works with any history provider (e.g. signalk-history-sqlite)
- * — no custom database needed.
+ * `network.internet.state` and `network.internet.speed.download` and
+ * renders a timeline of connectivity changes plus a pseudo-console of
+ * events (state transitions and recorded speed-test results). Works
+ * with any history provider (e.g. signalk-history-sqlite) — no custom
+ * database needed.
  *
  * Styled per the Signal K "Tactical Sci-Fi" UI spec: flat geometry,
  * corner-bracket framing, semantic neon segments, hardware-style
- * controls and monospace telemetry.
+ * controls and a 3-column monospace pseudo-console for the event
+ * history (spec §9).
  *
  * @file history-log.js
  */
 
-const HISTORY_PATH = "network.internet.state";
+import { fetchUnits, formatLocalTime, formatSI } from "../format.js";
+
+const STATE_PATH = "network.internet.state";
+const SPEED_PATH = "network.internet.speed.download";
 const HISTORY_BASE = "/signalk/v2/api/history/values";
 // Default to the last 7 days. The v2 API accepts from/to ISO timestamps.
 const DEFAULT_DAYS = 7;
+
+/** Maximum console lines rendered (spec §9 circular-buffer cap). */
+const MAX_LINES = 50;
 
 /** Map state -> theme color (spec §4 semantic neon). */
 const STATE_COLOR = {
@@ -42,16 +51,17 @@ class SiHistoryLog extends HTMLElement {
 
         .sk-card {
           --theme-color: var(--color-teal);
+          --theme-color-rgb: var(--color-teal-rgb);
           position: relative;
           display: block;
-          background: var(--bg-panel);
+          background: rgba(var(--theme-color-rgb), 0.05);
           color: var(--text-main);
           padding: 1.25rem 1.5rem 1.5rem;
           margin-bottom: 1.5rem;
-          border: 1px solid rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(var(--theme-color-rgb), 0.3);
         }
 
-        /* Corner brackets (spec §3). */
+        /* Corner brackets (spec §5). */
         .sk-card::before,
         .sk-card::after {
           content: "";
@@ -100,7 +110,7 @@ class SiHistoryLog extends HTMLElement {
           margin-right: 0.4rem;
         }
 
-        /* Hardware-style select (spec §6). */
+        /* Hardware-style select (spec §7). */
         .select-wrap {
           position: relative;
           display: inline-flex;
@@ -158,12 +168,12 @@ class SiHistoryLog extends HTMLElement {
           color: var(--bg-base);
         }
 
-        /* Proportional timeline — sharp flat segments (spec §3). */
+        /* Proportional timeline — sharp flat segments (spec §5). */
         .timeline {
           display: flex;
           height: 2rem;
           overflow: hidden;
-          border: 1px solid rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(var(--theme-color-rgb), 0.3);
           background: var(--bg-panel-muted);
         }
         .segment {
@@ -193,32 +203,54 @@ class SiHistoryLog extends HTMLElement {
           display: inline-block;
         }
 
-        .events {
+        /* Event console (spec §9): 3-column pseudo-console grid. */
+        .console {
           margin: 1.1rem 0 0;
-          padding: 0;
-          list-style: none;
-          max-height: 14rem;
+          border: 1px solid rgba(var(--theme-color-rgb), 0.15);
+          background: var(--bg-panel-muted);
+          max-height: 16rem;
           overflow-y: auto;
-        }
-        .events li {
           font-family: ui-monospace, "Fira Code", monospace;
+        }
+        .row {
+          display: grid;
+          /* First column fits YYYY-MM-DD HH:mm timestamps. */
+          grid-template-columns: 11em 1fr auto;
+          gap: 0.75rem;
+          align-items: baseline;
+          padding: 0.45rem 0.75rem;
+          border-bottom: 1px solid rgba(var(--theme-color-rgb), 0.12);
           font-size: 0.85rem;
           font-variant-numeric: tabular-nums;
-          padding: 0.45rem 0;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
-        .events time {
+        .row:last-child {
+          border-bottom: none;
+        }
+        .row time {
           color: var(--text-muted);
-          margin-right: 0.6rem;
         }
-        .events .marker {
-          margin-right: 0.35rem;
+        .row .msg {
+          color: var(--text-main);
+        }
+        .row .status {
+          justify-self: end;
+          white-space: nowrap;
         }
 
         .empty {
           color: var(--text-muted);
           font-size: 0.85rem;
           margin-top: 0.75rem;
+        }
+
+        /* Error state: a failed History API call is a fault, not an
+           empty dataset — show it loud (spec §4 red, §9 brackets). */
+        .empty.error {
+          color: var(--color-red);
+          font-family: ui-monospace, "Fira Code", monospace;
+          font-size: 0.85rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
         }
 
         @media (max-width: 600px) {
@@ -242,7 +274,7 @@ class SiHistoryLog extends HTMLElement {
         </div>
         <div class="timeline" id="timeline"></div>
         <div class="legend" id="legend"></div>
-        <ul class="events" id="events"></ul>
+        <div class="console" id="console"></div>
         <p class="empty" id="empty">No history available.</p>
       </div>
     `;
@@ -255,9 +287,13 @@ class SiHistoryLog extends HTMLElement {
     /** @type {HTMLElement} */
     this.legendEl = shadow.getElementById("legend");
     /** @type {HTMLElement} */
-    this.eventsEl = shadow.getElementById("events");
+    this.consoleEl = shadow.getElementById("console");
     /** @type {HTMLElement} */
     this.emptyEl = shadow.getElementById("empty");
+
+    // Unit fallback matching the meta this plugin publishes; replaced by
+    // the tree's meta when reachable (spec §2).
+    this._speedUnit = "bit/s";
 
     this.windowEl.addEventListener("change", () => this.load());
     this.refreshEl.addEventListener("click", () => this.load());
@@ -265,6 +301,10 @@ class SiHistoryLog extends HTMLElement {
 
   connectedCallback() {
     this.renderLegend();
+    // Meta-driven unit (spec §2) before the first render, then load.
+    fetchUnits("network/internet", "speed.download").then((u) => {
+      if (u) this._speedUnit = u;
+    });
     this.load();
   }
 
@@ -279,22 +319,28 @@ class SiHistoryLog extends HTMLElement {
     const days = parseInt(this.windowEl.value, 10) || DEFAULT_DAYS;
     const to = new Date();
     const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
-    // state is a string enum, so use the :last aggregation postfix — the
-    // default average returns no rows for non-numeric values.
+    // Both paths are non-numeric-friendly strings / sparse samples, so
+    // use the :last aggregation postfix — the default average returns
+    // no rows for string values and hides sparse speed samples.
+    const paths = `${STATE_PATH}:last,${SPEED_PATH}:last`;
     const url =
-      `${HISTORY_BASE}?paths=${encodeURIComponent(HISTORY_PATH + ":last")}` +
+      `${HISTORY_BASE}?paths=${encodeURIComponent(paths)}` +
       `&from=${from.toISOString()}&to=${to.toISOString()}`;
 
     let data;
     try {
       const res = await fetch(url);
       if (!res.ok) {
-        this.showEmpty(`History API returned ${res.status}`);
+        this.showError(
+          `History API returned ${res.status}${
+            res.statusText ? ` (${res.statusText})` : ""
+          }`,
+        );
         return;
       }
       data = await res.json();
     } catch (e) {
-      this.showEmpty(`History API error: ${e.message}`);
+      this.showError(`History API error: ${e.message}`);
       return;
     }
 
@@ -303,26 +349,42 @@ class SiHistoryLog extends HTMLElement {
 
   /**
    * @param {object} data - v2 history ValuesResponse: { context, range,
-   *   values: [{path, method}], data: [[ts, value, ...], ...] }
+   *   values: [{path, method}], data: [[ts, state, speed], ...] }
    * @param {Date} from
    * @param {Date} to
    */
   render(data, from, to) {
-    // data is an array of rows; the first element of each row is the
-    // ISO timestamp and the rest are the per-path values (null when
-    // missing). We query a single path, so each row is [ts, state].
+    // Rows are [timestamp, state, speed]; each column is null when the
+    // bucket holds no sample for that path.
     const rows = Array.isArray(data?.data) ? data.data : [];
-    // Drop rows where the state column is null (no sample in that bucket).
-    const series = rows
+    const stateSeries = rows
       .filter((row) => row[1] != null)
       .map((row) => ({ ts: new Date(row[0]).getTime(), value: row[1] }));
-    if (!series.length) {
+    const speedSamples = rows
+      .filter((row) => row[2] != null)
+      .map((row) => ({ ts: new Date(row[0]).getTime(), value: row[2] }));
+
+    if (!stateSeries.length && !speedSamples.length) {
       this.showEmpty("No connectivity data recorded yet.");
       return;
     }
     this.emptyEl.style.display = "none";
+    this.renderTimeline(stateSeries, from, to);
+    this.renderConsole(stateSeries, speedSamples);
+  }
 
-    // Build a proportional timeline of segments.
+  /**
+   * Builds the proportional state timeline.
+   *
+   * @param {{ts: number, value: string}[]} series
+   * @param {Date} from
+   * @param {Date} to
+   */
+  renderTimeline(series, from, to) {
+    if (!series.length) {
+      this.timelineEl.innerHTML = "";
+      return;
+    }
     const span = to.getTime() - from.getTime();
     const segments = [];
     for (let i = 0; i < series.length; i++) {
@@ -341,37 +403,80 @@ class SiHistoryLog extends HTMLElement {
           `<div class="segment" style="width:${s.width}%;background:${STATE_COLOR[s.value] || STATE_COLOR.unknown}" title="${s.value}"></div>`,
       )
       .join("");
+  }
 
-    // Events list: state transitions (newest first).
-    const transitions = [];
+  /**
+   * Renders the event console: state transitions and recorded speed-test
+   * results, newest first, capped at {@link MAX_LINES} (spec §9).
+   *
+   * @param {{ts: number, value: string}[]} stateSeries
+   * @param {{ts: number, value: number}[]} speedSamples
+   */
+  renderConsole(stateSeries, speedSamples) {
+    const events = [];
+
+    // State transitions (consecutive equal states collapse).
     let prev = null;
-    for (const { ts, value } of series) {
+    for (const { ts, value } of stateSeries) {
       if (value !== prev) {
-        transitions.push({ ts, value });
+        events.push({
+          ts,
+          msg: "Link state changed",
+          status: `[ ${(value || "unknown").toUpperCase()} ]`,
+          color: STATE_COLOR[value] || STATE_COLOR.unknown,
+        });
         prev = value;
       }
     }
-    transitions.reverse();
 
-    this.eventsEl.innerHTML = transitions
-      .slice(0, 50)
-      .map((t) => {
-        const time = new Date(t.ts).toLocaleString();
-        const color = STATE_COLOR[t.value] || STATE_COLOR.unknown;
-        return `<li><time>${time}</time><span class="marker" style="color:${color}">●</span>${t.value}</li>`;
-      })
+    // Recorded speed-test results (throughput in bit/s).
+    for (const { ts, value } of speedSamples) {
+      events.push({
+        ts,
+        msg: "Speed test",
+        status: `[ ${formatSI(value, this._speedUnit)} ]`,
+        color: "var(--color-teal)",
+      });
+    }
+
+    events.sort((a, b) => b.ts - a.ts);
+
+    this.consoleEl.innerHTML = events
+      .slice(0, MAX_LINES)
+      .map(
+        (e) =>
+          `<div class="row"><time>${formatLocalTime(e.ts)}</time>` +
+          `<span class="msg">${e.msg}</span>` +
+          `<span class="status" style="color:${e.color}">${e.status}</span></div>`,
+      )
       .join("");
   }
 
   /** @param {string} text */
   showEmpty(text) {
     this.timelineEl.innerHTML = "";
-    this.eventsEl.innerHTML = "";
+    this.consoleEl.innerHTML = "";
     this.emptyEl.textContent = text;
+    this.emptyEl.className = "empty";
+    this.emptyEl.style.display = "block";
+  }
+
+  /**
+   * Shows a fetch fault as an error (red, bracketed) rather than a
+   * muted empty state — a 400 from the History API means the request
+   * or provider failed, which the user should notice.
+   *
+   * @param {string} text
+   */
+  showError(text) {
+    this.timelineEl.innerHTML = "";
+    this.consoleEl.innerHTML = "";
+    this.emptyEl.textContent = `[ FAIL ] ${text}`;
+    this.emptyEl.className = "empty error";
     this.emptyEl.style.display = "block";
   }
 }
 
 customElements.define("si-history-log", SiHistoryLog);
 
-export { HISTORY_BASE, HISTORY_PATH, SiHistoryLog };
+export { HISTORY_BASE, SiHistoryLog, SPEED_PATH, STATE_PATH };

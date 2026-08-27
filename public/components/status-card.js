@@ -1,14 +1,18 @@
 /**
- * Status card: shows the live internet state and ping, with a manual
- * override toggle and a speed-test button that is disabled when the
- * state is metered or offline (bandwidth guard).
+ * Status card: shows the live internet state, ping and last measured
+ * download speed, with a manual override toggle and a speed-test button
+ * that is disabled when the state is metered or offline (bandwidth
+ * guard). After a successful test it dispatches `si:speedtest` so the
+ * host can refresh the recorded history.
  *
  * Styled per the Signal K "Tactical Sci-Fi" UI spec: flat geometry,
- * corner-bracket framing, semantic neon theme classes, hardware-style
- * inputs and bracket toggle buttons.
+ * corner-bracket framing, semantic neon theme classes with ultra-faint
+ * tints, hardware-style inputs and bracket toggle buttons.
  *
  * @file status-card.js
  */
+
+import { fetchUnits, formatSI } from "../format.js";
 
 const API_BASE = "/plugins/signalk-internet";
 
@@ -49,15 +53,17 @@ class SiStatusCard extends HTMLElement {
            swaps it and tints backgrounds. */
         .card {
           --theme-color: var(--color-grey);
-          --theme-color-rgb: 68, 68, 68;
+          --theme-color-rgb: var(--color-grey-rgb);
 
           position: relative;
           display: block;
-          background: var(--bg-panel);
+          /* Ultra-faint theme tint (spec §5) — the theme classes below
+             only swap the vars, so the tint follows day/night too. */
+          background: rgba(var(--theme-color-rgb), 0.05);
           color: var(--text-main);
           padding: 1.25rem 1.5rem 1.5rem;
           margin-bottom: 1.5rem;
-          border: 1px solid rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(var(--theme-color-rgb), 0.3);
         }
 
         /* Corner brackets (spec §3) — 2px L-shapes on each corner. */
@@ -86,23 +92,23 @@ class SiStatusCard extends HTMLElement {
         /* Theme classes. */
         .card.theme-green {
           --theme-color: var(--color-green);
-          --theme-color-rgb: 107, 158, 120;
+          --theme-color-rgb: var(--color-green-rgb);
         }
         .card.theme-teal {
           --theme-color: var(--color-teal);
-          --theme-color-rgb: 75, 139, 153;
+          --theme-color-rgb: var(--color-teal-rgb);
         }
         .card.theme-orange {
           --theme-color: var(--color-orange);
-          --theme-color-rgb: 199, 123, 40;
+          --theme-color-rgb: var(--color-orange-rgb);
         }
         .card.theme-red {
           --theme-color: var(--color-red);
-          --theme-color-rgb: 201, 75, 75;
+          --theme-color-rgb: var(--color-red-rgb);
         }
         .card.theme-offline {
           --theme-color: var(--color-grey);
-          --theme-color-rgb: 68, 68, 68;
+          --theme-color-rgb: var(--color-grey-rgb);
         }
 
         .label {
@@ -139,6 +145,13 @@ class SiStatusCard extends HTMLElement {
         }
 
         .ping {
+          font-family: ui-monospace, "Fira Code", monospace;
+          color: var(--text-muted);
+          font-size: 1rem;
+          font-variant-numeric: tabular-nums;
+        }
+
+        .last-speed {
           font-family: ui-monospace, "Fira Code", monospace;
           color: var(--text-muted);
           font-size: 1rem;
@@ -264,6 +277,7 @@ class SiStatusCard extends HTMLElement {
           <span class="dot" id="dot"></span>
           <span class="state" id="state">UNKNOWN</span>
           <span class="ping" id="ping"></span>
+          <span class="last-speed" id="speed"></span>
         </div>
         <div class="controls">
           <div class="override-group">
@@ -288,6 +302,8 @@ class SiStatusCard extends HTMLElement {
     this.stateEl = shadow.getElementById("state");
     /** @type {HTMLElement} */
     this.pingEl = shadow.getElementById("ping");
+    /** @type {HTMLElement} */
+    this.speedEl = shadow.getElementById("speed");
     /** @type {HTMLSelectElement} */
     this.overrideEl = shadow.getElementById("override");
     /** @type {HTMLButtonElement} */
@@ -299,6 +315,12 @@ class SiStatusCard extends HTMLElement {
 
     this._state = "unknown";
     this._ping = null;
+    this._speed = null;
+    // Units come from the Signal K meta tree (spec §2); the values below
+    // are fallbacks for when the tree is unreachable and match the meta
+    // this plugin publishes.
+    this._pingUnit = "ms";
+    this._speedUnit = "bit/s";
     // Last override value this client has confirmed with the server.
     // The Apply button stays disabled until the select differs from it,
     // so a stray tap on a heeling boat can't change connectivity policy.
@@ -307,6 +329,23 @@ class SiStatusCard extends HTMLElement {
     this.overrideEl.addEventListener("change", () => this.syncApplyButton());
     this.applyEl.addEventListener("click", () => this.setOverride());
     this.speedtestEl.addEventListener("click", () => this.runSpeedTest());
+  }
+
+  connectedCallback() {
+    // Meta-driven units (spec §2): read units from the Signal K tree,
+    // keeping the fallback only when the API is unavailable.
+    fetchUnits("network/internet", "ping").then((u) => {
+      if (u) {
+        this._pingUnit = u;
+        this.render();
+      }
+    });
+    fetchUnits("network/internet", "speed.download").then((u) => {
+      if (u) {
+        this._speedUnit = u;
+        this.render();
+      }
+    });
   }
 
   /** Enable Apply only when the select differs from the applied override. */
@@ -326,11 +365,22 @@ class SiStatusCard extends HTMLElement {
     this.render();
   }
 
+  /** @param {number|null} value - Last measured download speed in bit/s */
+  set speed(value) {
+    this._speed = value;
+    this.render();
+  }
+
   render() {
     const s = this._state;
     this.stateEl.textContent = (STATE_LABELS[s] || "Unknown").toUpperCase();
     this.cardEl.className = `card ${STATE_THEME[s] || "theme-offline"}`;
-    this.pingEl.textContent = this._ping != null ? `· ${this._ping} ms` : "";
+    this.pingEl.textContent =
+      this._ping != null ? `· ${this._ping} ${this._pingUnit}` : "";
+    this.speedEl.textContent =
+      this._speed != null
+        ? `· ↓ ${formatSI(this._speed, this._speedUnit)}`
+        : "";
     // Disable the speed test whenever the state is metered or offline —
     // the server enforces the same guard, but disabling client-side
     // prevents accidental bandwidth use on satellite links.
@@ -381,8 +431,14 @@ class SiStatusCard extends HTMLElement {
       } else {
         const mb = (body.bytes / 1024 / 1024).toFixed(1);
         this.showResult(
-          `Downloaded ${mb} MB in ${body.elapsedMs} ms — ${body.throughputMbps.toFixed(1)} Mbit/s`,
+          `Downloaded ${mb} MB in ${body.elapsedMs} ms — ${formatSI(
+            body.throughputMbps * 1e6,
+            this._speedUnit,
+          )}`,
         );
+        // The server recorded this measurement as a delta; let the host
+        // refresh the connection history so it shows up immediately.
+        this.dispatchEvent(new CustomEvent("si:speedtest"));
       }
     } catch (e) {
       this.showResult(`Speed test failed: ${e.message}`, true);

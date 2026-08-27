@@ -22,6 +22,7 @@ const { guard, runSpeedTest, GuardError } = require("./lib/speedtest.js");
  */
 const STATE_PATH = "network.internet.state";
 const PING_PATH = "network.internet.ping";
+const SPEED_PATH = "network.internet.speed.download";
 
 /**
  * Plugin identifier (matches package name without the scope).
@@ -76,6 +77,8 @@ module.exports = (app) => {
   const unsubscribes = [];
   let evaluator = null;
   let pollInterval = null;
+  // Injectable speed test (tests); falls back to the real HTTPS download.
+  let speedTestFn = null;
 
   const plugin = {
     id: PLUGIN_ID,
@@ -187,6 +190,7 @@ module.exports = (app) => {
         typeof raw.probe === "function" ? raw.probe : () => probeWithRetry();
 
       evaluator = createEvaluator({ config, onState: publish, probe });
+      speedTestFn = typeof raw.speedtest === "function" ? raw.speedtest : null;
 
       // Subscribe to the Signal K paths the heuristic and hardware rules
       // watch, so the evaluator's stream cache stays current.
@@ -238,6 +242,15 @@ module.exports = (app) => {
                     "Round-trip latency to the verification endpoint",
                 },
               },
+              {
+                path: SPEED_PATH,
+                value: {
+                  units: "bit/s",
+                  displayName: "Internet download speed",
+                  description:
+                    "Download throughput measured by the last successful speed test",
+                },
+              },
             ],
           },
         ],
@@ -254,9 +267,41 @@ module.exports = (app) => {
       for (const f of unsubscribes) f();
       unsubscribes.length = 0;
       evaluator = null;
+      speedTestFn = null;
       setStatus("Internet monitor stopped");
     },
   };
+
+  // --- Speed-test recording ------------------------------------------------
+
+  /**
+   * Publishes a completed speed-test measurement so it is recorded by
+   * whatever history provider is running (the same mechanism behind the
+   * connection history) and stays visible to other consumers. The value
+   * is in bit/s so UIs can scale it with SI prefixes; speed tests are
+   * manual, infrequent actions, so one delta per run does not spam the
+   * bus. Failures are not recorded — only real measurements.
+   *
+   * Factory-scoped so the REST router can call it.
+   *
+   * @param {{bytes: number, elapsedMs: number, throughputMbps: number}} result
+   */
+  function recordSpeed(result) {
+    const bitsPerSecond =
+      result.elapsedMs > 0
+        ? Math.round((result.bytes * 8) / (result.elapsedMs / 1000))
+        : 0;
+    app.handleMessage(PLUGIN_ID, {
+      context: "vessels.self",
+      updates: [
+        {
+          source: { label: PLUGIN_ID, src: "internet" },
+          timestamp: new Date().toISOString(),
+          values: [{ path: SPEED_PATH, value: bitsPerSecond }],
+        },
+      ],
+    });
+  }
 
   /**
    * Collects every Signal K path referenced by the configured heuristic
@@ -363,8 +408,15 @@ module.exports = (app) => {
         }
         throw err;
       }
-      runSpeedTest()
-        .then((result) => res.json(result))
+      // Tests may inject a fake test via `options.speedtest` to avoid
+      // hitting the network (mirrors the `probe` injection).
+      const runTest =
+        typeof speedTestFn === "function" ? speedTestFn : runSpeedTest;
+      runTest()
+        .then((result) => {
+          recordSpeed(result);
+          res.json(result);
+        })
         .catch((err) => {
           app.error(`Speed test failed: ${err.message}`);
           res.status(500).json({ message: err.message });
@@ -402,5 +454,6 @@ function resolveOverride(body) {
 module.exports.PLUGIN_ID = PLUGIN_ID;
 module.exports.STATE_PATH = STATE_PATH;
 module.exports.PING_PATH = PING_PATH;
+module.exports.SPEED_PATH = SPEED_PATH;
 module.exports.DEFAULT_CONNECTION_MAPPINGS = DEFAULT_CONNECTION_MAPPINGS;
 module.exports.DEFAULT_STATE_HEURISTICS = DEFAULT_STATE_HEURISTICS;

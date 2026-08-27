@@ -196,6 +196,14 @@ describe("plugin", () => {
       return u.some((x) => x.meta);
     });
     assert.ok(meta, "expected a meta delta on start");
+    const paths = [];
+    for (const u of meta.delta.updates || []) {
+      for (const m of u.meta || []) paths.push(m.path);
+    }
+    assert.ok(
+      paths.includes(pluginFactory.SPEED_PATH),
+      `expected ${pluginFactory.SPEED_PATH} meta`,
+    );
     plugin.stop();
   });
 
@@ -347,5 +355,75 @@ describe("plugin", () => {
     );
     post.handler({}, res);
     assert.strictEqual(res.statusCode, 503);
+  });
+
+  test("speedtest POST records the result as a speed delta", async () => {
+    // Deterministic fake download: 1 MB in 1 s -> 8,000,000 bit/s.
+    const fakeSpeedtest = async () => ({
+      bytes: 1_000_000,
+      elapsedMs: 1000,
+      throughputMbps: 8,
+    });
+    plugin.start({
+      pollInterval: 60,
+      probe: fakeProbe,
+      speedtest: fakeSpeedtest,
+    });
+    plugin.registerWithRouter(app.router);
+    // Let the initial probe settle to `online` so the guard passes.
+    await new Promise((r) => setTimeout(r, 10));
+    const post = app.router.routes.find(
+      (r) => r.method === "post" && r.path === "/speedtest",
+    );
+    const res = makeRes();
+    await post.handler({}, res);
+    // The handler resolves asynchronously once the download completes.
+    await new Promise((r) => setTimeout(r, 10));
+    assert.strictEqual(res.statusCode, 200);
+    const speedMsg = app
+      .getMessages()
+      .find((m) =>
+        (m.delta.updates || []).some((u) =>
+          (u.values || []).some(
+            (v) => v.path === pluginFactory.SPEED_PATH && v.value === 8_000_000,
+          ),
+        ),
+      );
+    assert.ok(speedMsg, `expected a ${pluginFactory.SPEED_PATH}=8000000 delta`);
+    plugin.stop();
+  });
+
+  test("speedtest POST records nothing when the guard blocks", () => {
+    const fakeSpeedtest = async () => ({
+      bytes: 1_000_000,
+      elapsedMs: 1000,
+      throughputMbps: 8,
+    });
+    plugin.start({
+      pollInterval: 60,
+      probe: fakeProbe,
+      speedtest: fakeSpeedtest,
+    });
+    plugin.registerWithRouter(app.router);
+    const put = app.router.routes.find(
+      (r) => r.method === "put" && r.path === "/override",
+    );
+    put.handler({ body: { state: "offline" } }, makeRes());
+
+    const post = app.router.routes.find(
+      (r) => r.method === "post" && r.path === "/speedtest",
+    );
+    const res = makeRes();
+    post.handler({}, res);
+    assert.strictEqual(res.statusCode, 409);
+    const recorded = app
+      .getMessages()
+      .some((m) =>
+        (m.delta.updates || []).some((u) =>
+          (u.values || []).some((v) => v.path === pluginFactory.SPEED_PATH),
+        ),
+      );
+    assert.ok(!recorded, "a blocked speed test must not be recorded");
+    plugin.stop();
   });
 });

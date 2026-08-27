@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Speed-test results are now **recorded and shown in the connection
+  history**: every successful speed test publishes a
+  `network.internet.speed.download` delta (bit/s, with `meta` units), so
+  results land in whatever history provider stores the connection
+  history — no custom database. The webapp's connection history queries
+  the new path alongside the state and renders each recorded test in the
+  event console (`[ 7.3 Mbit/s ]`), and the status card shows the last
+  measured download speed live.
+- The webapp now visually indicates a lost Signal K stream: a flat red
+  `SIGNAL LOST — RECONNECTING` banner appears when the WebSocket drops.
+
+### Changed
+- Updated the webapp to the revised "Tactical Sci-Fi" UI spec: the
+  day/night theme now uses per-mode intensity-shifted semantic colors
+  (bright/saturated day, dimmed night) over a constant dark canvas
+  instead of dimming the background; panel edges and ultra-faint theme
+  tints are derived from the theme color via
+  `rgba(var(--theme-color-rgb), …)` so they follow the active mode; and
+  the connection-history event list is now a 3-column pseudo-console
+  (`Timestamp | Message | Status`) with right-aligned bracketed statuses
+  in monospace, `YYYY-MM-DD HH:mm` local ship-time timestamps without a
+  timezone suffix, and a 50-line render cap.
+- WebSocket subscriptions now request a `minRate` floor (1s) and
+  reconnect with exponential backoff (1s doubling to a 30s cap, reset on
+  a successful open) instead of a fixed 5s retry.
+- Units are no longer hardcoded in the webapp: the ping and speed
+  readouts read `meta.units` from the Signal K tree and scale values with
+  SI prefixes (`7,340,000 bit/s` → `7.3 Mbit/s`) via a shared,
+  unit-tested `format.js` helper.
+
 ## [0.3.0] - 2026-08-26
 ### Changed
 - Restyled the plugin webapp (status card + connection history) to the

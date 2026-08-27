@@ -3,33 +3,64 @@
  *
  * Opens a WebSocket to `/signalk/v1/stream?subscribe=none` and subscribes
  * to the plugin's connectivity paths. Forwards each value to a callback.
- * Auto-reconnects on loss.
+ *
+ * Spec §2 compliance: subscriptions carry a `minRate` floor (these paths
+ * are low-frequency telemetry, not steering data), reconnection uses
+ * exponential backoff, and connection-state changes are surfaced via an
+ * optional `onStatus` callback so the UI can indicate a lost signal.
  *
  * @file signalk-stream.js
  */
 
 const STATE_PATH = "network.internet.state";
 const PING_PATH = "network.internet.ping";
+const SPEED_PATH = "network.internet.speed.download";
 const MODE_PATH = "vessels.self.environment.mode";
+
+/** Minimum update interval requested for every subscription (ms). */
+const MIN_RATE_MS = 1000;
+
+/** Reconnect backoff bounds (ms). */
+const BACKOFF_BASE_MS = 1000;
+const BACKOFF_MAX_MS = 30000;
+
+/**
+ * Exponential reconnect delay for a failed connection attempt.
+ *
+ * @param {number} attempt - Number of failed attempts since the last
+ *   successful open (0-based)
+ * @returns {number} Delay in ms, doubling per attempt and capped at
+ *   {@link BACKOFF_MAX_MS}
+ */
+function backoffDelay(attempt) {
+  return Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
+}
 
 class SignalKStream {
   /**
    * @param {(path: string, value: unknown) => void} onValue - Called for
    *   each subscribed value update
+   * @param {(status: "connecting"|"open"|"offline") => void} [onStatus] -
+   *   Called on connection state changes
    */
-  constructor(onValue) {
+  constructor(onValue, onStatus) {
     /** @type {((path: string, value: unknown) => void)|null} */
     this.onValue = onValue;
+    /** @type {((status: string) => void)|null} */
+    this.onStatus = onStatus;
     /** @type {WebSocket|null} */
     this.socket = null;
     /** @type {number|null} */
     this.reconnectTimer = null;
     /** @type {boolean} */
     this.closed = false;
+    /** @type {number} Failed connection attempts since the last open. */
+    this.attempts = 0;
   }
 
   connect() {
     if (this.closed) return;
+    this.onStatus?.("connecting");
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const socket = new WebSocket(
       `${proto}://${window.location.host}/signalk/v1/stream?subscribe=none`,
@@ -37,13 +68,16 @@ class SignalKStream {
     this.socket = socket;
 
     socket.addEventListener("open", () => {
+      this.attempts = 0;
+      this.onStatus?.("open");
       socket.send(
         JSON.stringify({
           context: "vessels.self",
           subscribe: [
-            { path: STATE_PATH },
-            { path: PING_PATH },
-            { path: MODE_PATH },
+            { path: STATE_PATH, minRate: MIN_RATE_MS },
+            { path: PING_PATH, minRate: MIN_RATE_MS },
+            { path: SPEED_PATH, minRate: MIN_RATE_MS },
+            { path: MODE_PATH, minRate: MIN_RATE_MS },
           ],
         }),
       );
@@ -64,9 +98,12 @@ class SignalKStream {
     });
 
     socket.addEventListener("close", () => {
-      if (!this.closed) {
-        this.reconnectTimer = setTimeout(() => this.connect(), 5000);
-      }
+      if (this.closed) return;
+      this.onStatus?.("offline");
+      // Exponential backoff: 1s, 2s, 4s … capped at 30s, reset on open.
+      const delay = backoffDelay(this.attempts);
+      this.attempts += 1;
+      this.reconnectTimer = setTimeout(() => this.connect(), delay);
     });
 
     socket.addEventListener("error", () => {
@@ -81,4 +118,11 @@ class SignalKStream {
   }
 }
 
-export { MODE_PATH, PING_PATH, SignalKStream, STATE_PATH };
+export {
+  backoffDelay,
+  MODE_PATH,
+  PING_PATH,
+  SignalKStream,
+  SPEED_PATH,
+  STATE_PATH,
+};

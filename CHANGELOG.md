@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-08-28
 
 ### Added
 - Ships a ready-made Status Tiles example set discoverable by the
@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single `internet` tile mapping `network.internet.state` to
   green/amber/red/neutral, with footer context from the plugin's own
   ping path plus the recommended Starlink/LTE companion paths.
+
+## [0.4.0] - 2026-08-27
 
 ### Added
 - Speed-test results are now **recorded and shown in the connection

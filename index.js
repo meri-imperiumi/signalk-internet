@@ -13,6 +13,9 @@
 /** @typedef {import("@signalk/server-api").ServerAPI} ServerAPI */
 /** @typedef {import("@signalk/server-api").Plugin} Plugin */
 
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
+
 const { createEvaluator } = require("./lib/evaluator.js");
 const { probeWithRetry } = require("./lib/prober.js");
 const { guard, runSpeedTest, GuardError } = require("./lib/speedtest.js");
@@ -28,6 +31,17 @@ const SPEED_PATH = "network.internet.speed.download";
  * Plugin identifier (matches package name without the scope).
  */
 const PLUGIN_ID = "signalk-internet";
+
+/**
+ * Example Status Tiles set shipped for one-tap copy. Discovered by the
+ * Status Tiles webapp through the `statusTileExamples` resource type.
+ * Pure config — no code runs from it — so it is low-risk to load once
+ * at module scope. See doc/sharing-example-tile-sets.md upstream and
+ * `status-tiles-examples.json` for the set contents.
+ */
+const STATUS_TILES_EXAMPLES = JSON.parse(
+  readFileSync(join(__dirname, "status-tiles-examples.json"), "utf8"),
+);
 
 /**
  * Default hardware uplink mappings shipped out of the box.
@@ -79,6 +93,10 @@ module.exports = (app) => {
   let pollInterval = null;
   // Injectable speed test (tests); falls back to the real HTTPS download.
   let speedTestFn = null;
+  /** @type {boolean} plugin started; gates the examples provider */
+  let running = false;
+  /** @type {boolean} resource provider registered with the server */
+  let providerRegistered = false;
 
   const plugin = {
     id: PLUGIN_ID,
@@ -142,6 +160,8 @@ module.exports = (app) => {
     },
 
     start: (options) => {
+      running = true;
+      registerExamplesProvider();
       const raw = options || {};
       // Fall back to the shipped Starlink mapping when the user hasn't
       // configured any (undefined). An explicit empty array means the user
@@ -260,6 +280,7 @@ module.exports = (app) => {
     },
 
     stop: () => {
+      running = false;
       if (pollInterval) {
         clearInterval(pollInterval);
         pollInterval = null;
@@ -301,6 +322,47 @@ module.exports = (app) => {
         },
       ],
     });
+  }
+
+  /**
+   * Registers a read-only `statusTileExamples` resource provider so the
+   * Status Tiles webapp can offer this plugin's example tiles for
+   * one-tap copy. Provision is gated by `running` (returns {} when
+   * stopped, so a disabled plugin disappears from the discovery list
+   * with no stale entries) and registered at most once per plugin
+   * instance — a restart (stop+start on a config save) must not
+   * double-register. Skipped silently on servers without the resource
+   * provider registry (older servers); example discovery simply won't
+   * include this plugin's set.
+   */
+  function registerExamplesProvider() {
+    if (providerRegistered) return;
+    if (typeof app.registerResourceProvider !== "function") {
+      app.error(
+        `${PLUGIN_ID}: server has no resource provider registry; status-tiles examples disabled`,
+      );
+      return;
+    }
+    app.registerResourceProvider({
+      type: "statusTileExamples",
+      methods: {
+        listResources: async () =>
+          running ? { [PLUGIN_ID]: STATUS_TILES_EXAMPLES } : {},
+        getResource: async (id) => {
+          if (!running || id !== PLUGIN_ID) {
+            throw new Error(`No such statusTileExamples resource: ${id}`);
+          }
+          return STATUS_TILES_EXAMPLES;
+        },
+        setResource: async () => {
+          throw new Error(`${PLUGIN_ID} is a read-only provider`);
+        },
+        deleteResource: async () => {
+          throw new Error(`${PLUGIN_ID} is a read-only provider`);
+        },
+      },
+    });
+    providerRegistered = true;
   }
 
   /**

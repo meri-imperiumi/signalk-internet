@@ -1,0 +1,36 @@
+{
+  "name": "Internet Connectivity Monitor examples",
+  "description": "Tiles for paths published by @meri-imperiumi/signalk-internet. Without the plugin the tile shows neutral; installing the recommended signalk-starlink / @meri-imperiumi/signalk-teltonika-rutx11 companions populates the footer context.",
+  "sets": [
+    {
+      "id": "internet-connectivity",
+      "name": "Internet connectivity",
+      "description": "Live internet state from signalk-internet, with footer context from its recommended Starlink/LTE companions.",
+      "tiles": [
+        {
+          "id": "internet",
+          "label": "Internet",
+          "checks": [
+            {
+              "type": "stateMatch",
+              "path": "network.internet.state",
+              "map": [
+                { "value": "offline", "state": "neutral" },
+                { "value": "online", "state": "green" },
+                { "value": "metered", "state": "amber" },
+                { "value": "captive", "state": "red" }
+              ],
+              "default": "neutral",
+              "display": true
+            }
+          ],
+          "footer": [
+            { "label": "Ping", "path": "network.internet.ping" },
+            { "label": "Starlink", "path": "network.providers.starlink.status" },
+            { "label": "LTE", "path": "networking.lte.connectionText" }
+          ]
+        }
+      ]
+    }
+  ]
+}

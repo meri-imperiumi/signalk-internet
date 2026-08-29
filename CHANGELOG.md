@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - 2026-08-27
+## [Unreleased]
+
+### Added
+- Ships a ready-made Status Tiles example set discoverable by the
+  Status Tiles webapp for one-tap copy. The plugin registers a read-only
+  `statusTileExamples` resource provider in `start()` (gated by the
+  running state and idempotent per instance, returning `{}` when stopped
+  so a disabled plugin leaves no stale entries). The set contains a
+  single `internet` tile mapping `network.internet.state` to
+  green/amber/red/neutral, with footer context from the plugin's own
+  ping path plus the recommended Starlink/LTE companion paths.
 
 ### Added
 - Speed-test results are now **recorded and shown in the connection

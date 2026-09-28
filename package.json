@@ -26,7 +26,7 @@
   "signalk-plugin-enabled-by-default": true,
   "signalk": {
     "displayName": "Internet Connectivity Monitor",
-    "appIcon": "./icon.png",
+    "appIcon": "./icon-256.png",
     "screenshots": [
       "doc/internet.png"
     ],

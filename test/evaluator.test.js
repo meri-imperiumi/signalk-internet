@@ -141,6 +141,51 @@ describe("evaluator", () => {
     assert.strictEqual(ev.current().state, "metered");
   });
 
+  test("high-seas maritime zone heuristic refines a reachable base to metered", async () => {
+    const probe = async () => ({ state: "online", ping: 25 });
+    const ev = createEvaluator({
+      config: makeConfig({
+        heuristics: [
+          {
+            path: "navigation.maritimeZone",
+            triggerValue: "high-seas",
+            resultingState: "metered",
+          },
+        ],
+      }),
+      probe,
+    });
+    ev.set("navigation.maritimeZone", "high-seas");
+    await new Promise((r) => setTimeout(r, 10));
+    // online base + high-seas (Starlink ocean data) -> metered.
+    assert.strictEqual(ev.current().state, "metered");
+  });
+
+  test("territorial maritime zones do not trigger the metered rule", async () => {
+    const probe = async () => ({ state: "online", ping: 25 });
+    const ev = createEvaluator({
+      config: makeConfig({
+        heuristics: [
+          {
+            path: "navigation.maritimeZone",
+            triggerValue: "high-seas",
+            resultingState: "metered",
+          },
+        ],
+      }),
+      probe,
+    });
+    for (const zone of ["territorial-sea", "internal-waters", "land"]) {
+      ev.set("navigation.maritimeZone", zone);
+      await new Promise((r) => setTimeout(r, 10));
+      assert.strictEqual(
+        ev.current().state,
+        "online",
+        `zone ${zone} should not clamp the state`,
+      );
+    }
+  });
+
   test("on-watch heuristic does not upgrade an offline base", async () => {
     const probe = async () => ({ state: "offline", ping: null });
     const seen = [];

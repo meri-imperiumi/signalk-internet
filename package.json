@@ -32,6 +32,7 @@
     ],
     "recommends": [
       "signalk-starlink",
+      "signalk-starlink-offshore",
       "@meri-imperiumi/signalk-teltonika-rutx11"
     ]
   },

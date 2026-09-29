@@ -108,7 +108,7 @@ describe("plugin", () => {
     );
   });
 
-  test("schema ships a watch-schedule default in stateHeuristics", () => {
+  test("schema ships watch-schedule and maritime-zone defaults in stateHeuristics", () => {
     assert.deepStrictEqual(
       plugin.schema.properties.stateHeuristics.default,
       pluginFactory.DEFAULT_STATE_HEURISTICS,
@@ -123,6 +123,18 @@ describe("plugin", () => {
     );
     assert.strictEqual(
       pluginFactory.DEFAULT_STATE_HEURISTICS[0].resultingState,
+      "metered",
+    );
+    assert.strictEqual(
+      pluginFactory.DEFAULT_STATE_HEURISTICS[1].path,
+      "navigation.maritimeZone",
+    );
+    assert.strictEqual(
+      pluginFactory.DEFAULT_STATE_HEURISTICS[1].triggerValue,
+      "high-seas",
+    );
+    assert.strictEqual(
+      pluginFactory.DEFAULT_STATE_HEURISTICS[1].resultingState,
       "metered",
     );
   });
@@ -169,6 +181,10 @@ describe("plugin", () => {
     assert.ok(
       paths.includes("watch.state.onWatch"),
       `expected watch.state.onWatch in ${JSON.stringify(paths)}`,
+    );
+    assert.ok(
+      paths.includes("navigation.maritimeZone"),
+      `expected navigation.maritimeZone in ${JSON.stringify(paths)}`,
     );
     assert.ok(
       paths.includes("network.providers.starlink.status"),

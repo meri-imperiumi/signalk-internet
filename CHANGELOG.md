@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Recommends the new `signalk-starlink-offshore` companion plugin, which
+  publishes `navigation.maritimeZone` (`territorial-sea`,
+  `internal-waters`, `land`, or `high-seas`). A new shipped default
+  heuristic clamps the internet state to `metered` while the vessel is
+  on the high seas, where Starlink switches to its metered ocean data
+  plan; territorial waters and inland sailing stay on the default
+  unlimited plan. The shipped Status Tiles example tile now shows the
+  maritime zone in its footer.
+
 ## [0.5.0] - 2026-08-28
 
 ### Added

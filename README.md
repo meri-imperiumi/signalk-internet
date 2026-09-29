@@ -8,4 +8,5 @@ This plugin serves as an internet connectivity monitor for Signal K. Many Signal
 In addition to its own detection logic, the plugin can read status from uplink-specific provider plugins. Examples:
 
 * signalk-starlink sets `network.providers.starlink.status` to `online` when Starlink is connected
+* signalk-starlink-offshore sets `navigation.maritimeZone` to `territorial-sea`, `internal-waters`, `land`, or `high-seas`. The plugin ships a rule marking Starlink as `metered` while on the high seas (ocean data), keeping the default plan in territorial waters.
 * signalk-teltonika-rutx provides operator name in `networking.lte.connectionText`. You can set different operators as `online` or `metered`

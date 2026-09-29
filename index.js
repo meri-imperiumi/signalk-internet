@@ -62,22 +62,34 @@ const DEFAULT_CONNECTION_MAPPINGS = [
 /**
  * Default contextual state rules shipped out of the box.
  *
- * While a watch schedule is running the vessel is typically offshore on
- * a metered uplink (satellite, roaming SIM), so we conservatively assume
- * `metered` to keep downstream plugins from burning expensive bandwidth.
- * Heuristics are modifiers, not verdicts: this rule only clamps an
+ * Two shipped heuristics:
+ *
+ * - While a watch schedule is running the vessel is typically offshore on
+ *   a metered uplink (satellite, roaming SIM), so we conservatively assume
+ *   `metered` to keep downstream plugins from burning expensive bandwidth.
+ * - `signalk-starlink-offshore` publishes `navigation.maritimeZone` based
+ *   on the vessel's position; on the high seas Starlink switches to the
+ *   metered ocean data plan, while territorial waters and inland sailing
+ *   are covered by the standard unlimited plan.
+ *
+ * Heuristics are modifiers, not verdicts: they only clamp an
  * already-reachable base state down to `metered` — when there is no
  * internet (dish down, no LTE) the state stays `offline` rather than
  * falsely reporting a metered connection. The Signal K core publishes
  * `watch.state.onWatch` as a boolean; the evaluator coerces both sides to
  * strings before comparing, so a boolean `true` matches the configured
- * `triggerValue: "true"`. A user who wants a different assumption (or
+ * `triggerValue: "true"`. A user who wants different assumptions (or
  * none) can edit or clear the list.
  */
 const DEFAULT_STATE_HEURISTICS = [
   {
     path: "watch.state.onWatch",
     triggerValue: "true",
+    resultingState: "metered",
+  },
+  {
+    path: "navigation.maritimeZone",
+    triggerValue: "high-seas",
     resultingState: "metered",
   },
 ];
@@ -117,7 +129,7 @@ module.exports = (app) => {
           title: "Contextual State Rules (refine reachability)",
           default: DEFAULT_STATE_HEURISTICS,
           description:
-            "Heuristics refine an already-resolved reachability state and can only make it more severe (online < metered < captive < offline). They never create connectivity the uplink/probe didn't establish, so a 'metered when on watch' rule has no effect when the internet is actually down.",
+            "Heuristics refine an already-resolved reachability state and can only make it more severe (online < metered < captive < offline). They never create connectivity the uplink/probe didn't establish, so a 'metered when on watch' or 'metered on the high seas' rule has no effect when the internet is actually down.",
           items: {
             type: "object",
             properties: {

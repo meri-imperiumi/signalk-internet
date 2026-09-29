@@ -1,6 +1,6 @@
 {
   "name": "Internet Connectivity Monitor examples",
-  "description": "Tiles for paths published by @meri-imperiumi/signalk-internet. Without the plugin the tile shows neutral; installing the recommended signalk-starlink / @meri-imperiumi/signalk-teltonika-rutx11 companions populates the footer context.",
+  "description": "Tiles for paths published by @meri-imperiumi/signalk-internet. Without the plugin the tile shows neutral; installing the recommended signalk-starlink / signalk-starlink-offshore / @meri-imperiumi/signalk-teltonika-rutx11 companions populates the footer context.",
   "sets": [
     {
       "id": "internet-connectivity",
@@ -27,6 +27,7 @@
           "footer": [
             { "label": "Ping", "path": "network.internet.ping" },
             { "label": "Starlink", "path": "network.providers.starlink.status" },
+            { "label": "Zone", "path": "navigation.maritimeZone" },
             { "label": "LTE", "path": "networking.lte.connectionText" }
           ]
         }

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-28
+
 ### Added
 
 - An **Internet** button for chart plotters with Plotter Extensions support, such as Freeboard-SK: it opens a window with the current state, the manual override (Auto, Online, Metered, Offline) and the connection values, including the Starlink status, throughput and latency and the maritime zone when those plugins run. The button shows a warning while the state is `metered` or `captive` and an alarm while `offline`.

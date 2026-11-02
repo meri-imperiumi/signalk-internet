@@ -13,8 +13,8 @@
 /** @typedef {import("@signalk/server-api").ServerAPI} ServerAPI */
 /** @typedef {import("@signalk/server-api").Plugin} Plugin */
 
-const { readFileSync } = require("node:fs");
-const { join } = require("node:path");
+const { mkdirSync, readFileSync, writeFileSync } = require("node:fs");
+const { dirname, join } = require("node:path");
 
 const pkg = require("./package.json");
 
@@ -190,6 +190,53 @@ module.exports = (app) => {
       probeTimer = null;
     }
   }
+  /**
+   * File keeping the manual override across server and plugin restarts,
+   * in the plugin's data directory. Null on servers without one, which
+   * keep the override in memory only.
+   *
+   * @returns {string|null}
+   */
+  function overrideFile() {
+    if (typeof app.getDataDirPath !== "function") return null;
+    return join(app.getDataDirPath(), "override.json");
+  }
+
+  /**
+   * Reads the saved override, stored in the PUT /override body format so
+   * the same validation applies. A missing or unreadable file means no
+   * override: losing it must never stop the plugin from starting.
+   *
+   * @returns {"online"|"offline"|"metered"|"captive"|null}
+   */
+  function loadOverride() {
+    const file = overrideFile();
+    if (!file) return null;
+    try {
+      return resolveOverride(JSON.parse(readFileSync(file, "utf8"))) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Saves the override set through the REST API. A boat restarting
+   * mid-passage would otherwise come back on Auto and report a metered
+   * uplink as `online`.
+   *
+   * @param {"online"|"offline"|"metered"|"captive"|null} state
+   */
+  function saveOverride(state) {
+    const file = overrideFile();
+    if (!file) return;
+    try {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, JSON.stringify({ state }));
+    } catch (err) {
+      app.error(`${PLUGIN_ID}: could not save the override: ${err.message}`);
+    }
+  }
+
   // Injectable speed test (tests); falls back to the real HTTPS download.
   let speedTestFn = null;
   /** @type {boolean} plugin started; gates the resource providers */
@@ -426,6 +473,10 @@ module.exports = (app) => {
       // with the adaptive timer loop running behind it.
       scheduleProbe();
       evaluator.forceProbe();
+      // Restored after the initial probe has started: the probe reads the
+      // override when it resolves, so this costs no second probe.
+      const savedOverride = loadOverride();
+      if (savedOverride) evaluator.setOverride(savedOverride);
 
       // Send meta so consumers know the units and meaning of our paths.
       app.handleMessage(PLUGIN_ID, {
@@ -666,6 +717,7 @@ module.exports = (app) => {
         return;
       }
       evaluator.setOverride(state);
+      saveOverride(state);
       res.json({ override: evaluator.getOverride() });
     });
 

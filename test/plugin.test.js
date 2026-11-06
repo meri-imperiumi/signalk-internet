@@ -785,3 +785,76 @@ describe("plugin", () => {
     plugin.stop();
   });
 });
+
+describe("override persistence", () => {
+  const { mkdtempSync, rmSync, writeFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const { tmpdir } = require("node:os");
+
+  let dir;
+  test.beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "signalk-internet-"));
+  });
+  test.afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  /** A fresh server sharing the plugin data directory, as after a restart. */
+  function boot() {
+    const app = createMockApp();
+    app.getDataDirPath = () => dir;
+    const plugin = pluginFactory(app);
+    plugin.start({ pollInterval: 60, probe: fakeProbe });
+    plugin.registerWithRouter(app.router);
+    const route = (method) =>
+      app.router.routes.find(
+        (r) => r.method === method && r.path === "/override",
+      );
+    return {
+      plugin,
+      set: (state) => route("put").handler({ body: { state } }, makeRes()),
+      get: () => {
+        const res = makeRes();
+        route("get").handler({}, res);
+        return res.body.override;
+      },
+      states: () =>
+        app
+          .getMessages()
+          .flatMap((m) => m.delta.updates || [])
+          .flatMap((u) => u.values || [])
+          .filter((v) => v.path === "network.internet.state")
+          .map((v) => v.value),
+    };
+  }
+
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+
+  test("a metered override survives a restart", async () => {
+    const first = boot();
+    first.set("metered");
+    first.plugin.stop();
+
+    const second = boot();
+    assert.strictEqual(second.get(), "metered");
+    await settle();
+    assert.deepStrictEqual(second.states(), ["metered"]);
+    second.plugin.stop();
+  });
+
+  test("clearing the override is remembered too", () => {
+    const first = boot();
+    first.set("metered");
+    first.set(null);
+    first.plugin.stop();
+
+    const second = boot();
+    assert.strictEqual(second.get(), null);
+    second.plugin.stop();
+  });
+
+  test("an unreadable override file starts without an override", () => {
+    writeFileSync(join(dir, "override.json"), "{not json");
+    const booted = boot();
+    assert.strictEqual(booted.get(), null);
+    booted.plugin.stop();
+  });
+});

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The manual override survives a restart.** It was kept in memory only, so a server or plugin restart in the middle of an ocean passage came back on Auto: the probe got through, the state went to `online`, and plugins waiting on `metered` resumed downloading on an uplink billed per GB. The override is now saved to the plugin data directory (`override.json`) whenever it is set or cleared, and restored on start. A missing or unreadable file starts without an override, as before.
+
 ## [0.8.0] - 2026-10-28
 
 ### Added

@@ -13,6 +13,10 @@
          the spec's rgba(var(--theme-color-rgb), …) tints/borders while
          staying mode-reactive. */
       :root {
+        /* The canvas is dark in both modes, so the browser must draw its
+           own parts (a select's option list, scrollbars) dark as well. */
+        color-scheme: dark;
+
         /* Base Canvas (constant) */
         --bg-base: #080a0c;
         --bg-panel: #111414;

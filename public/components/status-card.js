@@ -208,6 +208,12 @@ class SiStatusCard extends HTMLElement {
           outline: none;
           border-bottom-color: var(--theme-color);
         }
+        /* The options inherit the select's light text, so the list they
+           open in needs the panel's dark background. */
+        option {
+          color: var(--text-main);
+          background: var(--bg-panel);
+        }
         /* Custom sharp arrow marker. */
         .select-wrap {
           position: relative;

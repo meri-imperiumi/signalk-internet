@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The pulldowns in the web app are readable again (#5).** The override and history-window options opened as white text on the browser's white list. The page now asks the browser for dark controls, and the options use the panel background.
+
 ## [0.8.0] - 2026-10-28
 
 ### Added

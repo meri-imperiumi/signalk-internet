@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A failed history request says why (#6).** The Signal K server answers 400 for any history provider failure, including a provider that cannot reach its database, and the web app showed only `History API returned 400 (Bad Request)`. It now adds the reason the server gives, so a database that is down no longer looks like a malformed request.
+
 ## [0.8.0] - 2026-10-28
 
 ### Added

@@ -5,10 +5,13 @@ const assert = require("node:assert/strict");
 // Node >=22 detects the module syntax on dynamic import.
 let formatSI;
 let formatLocalTime;
+let describeHttpError;
 
 describe("format helpers", () => {
   before(async () => {
-    ({ formatSI, formatLocalTime } = await import("../public/format.js"));
+    ({ formatSI, formatLocalTime, describeHttpError } = await import(
+      "../public/format.js"
+    ));
   });
 
   describe("formatSI", () => {
@@ -49,6 +52,48 @@ describe("format helpers", () => {
       const d = new Date(2026, 0, 2, 9, 30);
       assert.strictEqual(formatLocalTime(d.getTime()), "2026-01-02 09:30");
       assert.strictEqual(formatLocalTime(d.toISOString()), "2026-01-02 09:30");
+    });
+  });
+
+  describe("describeHttpError", () => {
+    const failed = (body, status = 400) =>
+      new Response(body, { status, statusText: "Bad Request" });
+
+    test("adds the reason a history provider failure gives as `error`", async () => {
+      const res = failed(JSON.stringify({ error: "QuestDB is not answering" }));
+      assert.strictEqual(
+        await describeHttpError(res),
+        "400 (Bad Request): QuestDB is not answering",
+      );
+    });
+
+    test("adds the reason given as `message`", async () => {
+      const res = failed(
+        JSON.stringify({ statusCode: 400, state: "FAILED", message: "nope" }),
+      );
+      assert.strictEqual(
+        await describeHttpError(res),
+        "400 (Bad Request): nope",
+      );
+    });
+
+    test("falls back to `message` when `error` is no text", async () => {
+      const res = failed(JSON.stringify({ error: {}, message: "nope" }));
+      assert.strictEqual(
+        await describeHttpError(res),
+        "400 (Bad Request): nope",
+      );
+    });
+
+    test("keeps the status alone when the body has no reason", async () => {
+      assert.strictEqual(
+        await describeHttpError(failed("<html>Bad Request</html>")),
+        "400 (Bad Request)",
+      );
+      assert.strictEqual(
+        await describeHttpError(failed(JSON.stringify({ error: {} }))),
+        "400 (Bad Request)",
+      );
     });
   });
 });

@@ -90,4 +90,28 @@ async function fetchUnits(branchPath, leafPath) {
   }
 }
 
-export { fetchUnits, formatLocalTime, formatSI };
+/**
+ * Describes a failed API response for the user. The Signal K server
+ * answers 400 for any history provider failure, including a provider
+ * that cannot reach its database, so the status alone reads as a bad
+ * request; the reason the server gives in the body (`error` or
+ * `message`) is added when there is one.
+ *
+ * @param {Response} res - A response that is not ok
+ * @returns {Promise<string>} e.g. `400 (Bad Request): <reason>`
+ */
+async function describeHttpError(res) {
+  const status = `${res.status}${res.statusText ? ` (${res.statusText})` : ""}`;
+  let reason;
+  try {
+    const body = await res.json();
+    reason = [body?.error, body?.message].find(
+      (text) => typeof text === "string" && text,
+    );
+  } catch {
+    // Not JSON: the status is all there is.
+  }
+  return reason ? `${status}: ${reason}` : status;
+}
+
+export { describeHttpError, fetchUnits, formatLocalTime, formatSI };

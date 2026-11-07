@@ -14,7 +14,12 @@
  * @file history-log.js
  */
 
-import { fetchUnits, formatLocalTime, formatSI } from "../format.js";
+import {
+  describeHttpError,
+  fetchUnits,
+  formatLocalTime,
+  formatSI,
+} from "../format.js";
 
 const STATE_PATH = "network.internet.state";
 const SPEED_PATH = "network.internet.speed.download";
@@ -331,11 +336,7 @@ class SiHistoryLog extends HTMLElement {
     try {
       const res = await fetch(url);
       if (!res.ok) {
-        this.showError(
-          `History API returned ${res.status}${
-            res.statusText ? ` (${res.statusText})` : ""
-          }`,
-        );
+        this.showError(`History API returned ${await describeHttpError(res)}`);
         return;
       }
       data = await res.json();
